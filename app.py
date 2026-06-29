@@ -87,7 +87,7 @@ with aba_producao:
                     }
                     supabase.table("vendas_e_financas").insert(financeiro_data).execute()
                     st.success(f"Pedido de {cliente} registrado com sucesso!")
-                    st.rerun()
+                    st.experimental_rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar dados: {e}")
 
@@ -168,7 +168,7 @@ with aba_producao:
             if st.button("Atualizar Status"):
                 supabase.table("pedidos").update({"status_producao": novo_status}).eq("id", pid).execute()
                 st.success(f"Status do pedido #{pid} alterado!")
-                st.rerun()
+                st.experimental_rerun()
         else:
             st.info("Nenhum pedido na fila de produção.")
 
@@ -192,7 +192,7 @@ with aba_estoque:
                 estoque_data = {"item_nome": item, "quantidade_atual": qtd_atual, "quantidade_minima": qtd_min, "preco_custo": custo_un}
                 supabase.table("estoque").insert(estoque_data).execute()
                 st.success(f"{item} adicionado!")
-                st.rerun()
+                st.experimental_rerun()
                 
     with ec2:
         res_est = supabase.table("estoque").select("*").execute()
@@ -271,7 +271,7 @@ with aba_financeiro:
             try:
                 supabase.table("vendas_e_financas").update({"status_financeiro": novo_status_fin}).eq("id", fid).execute()
                 st.success(f"Lançamento #{fid} atualizado para {novo_status_fin} com sucesso!")
-                st.rerun()
+                st.experimental_rerun()
             except Exception as e:
                 st.error(f"Erro ao atualizar status financeiro: {e}")
                 
