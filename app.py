@@ -222,33 +222,27 @@ with aba_financeiro:
         m2.metric("📉 Custo de Produção Total", f"R$ {custos_totais:,.2f}")
         m3.metric("📈 Lucro Líquido Real", f"R$ {lucro_total:,.2f}", delta=f"{((lucro_total/faturamento_total)*100 if faturamento_total > 0 else 0):.1f}% Margem")
         
-        # --- NOVO BLOCO: INTELIGÊNCIA ARTIFICIAL ---
+        # --- BLOCO: INTELIGÊNCIA ARTIFICIAL ---
         st.markdown("---")
         st.subheader("🤖 Previsão de Tendência de Faturamento com IA")
         
-        # Tratamento simples de séries temporais para a IA aprender
         df_fin['data_pagamento'] = pd.to_datetime(df_fin['data_pagamento'])
         df_agrupado = df_fin.groupby('data_pagamento')['valor_venda'].sum().reset_index().sort_values('data_pagamento')
         
         if len(df_agrupado) >= 2:
-            # Cria uma linha do tempo numérica para a IA entender (Dias decorridos)
             data_minima = df_agrupado['data_pagamento'].min()
             df_agrupado['Dias_Numericos'] = (df_agrupado['data_pagamento'] - data_minima).dt.days
             
-            # X = Variável independente (Tempo), Y = Variável dependente (Faturamento obtido)
             X = df_agrupado[['Dias_Numericos']].values
             Y = df_agrupado['valor_venda'].values
             
-            # Treina o modelo matemático de Regressão Linear
             modelo_ia = LinearRegression()
             modelo_ia.fit(X, Y)
             
-            # Gera previsões automáticas para os próximos 3 dias úteis na sequência
             ultimo_dia_numerico = int(df_agrupado['Dias_Numericos'].max())
             futuro_dias = np.array([[ultimo_dia_numerico + 1], [ultimo_dia_numerico + 2], [ultimo_dia_numerico + 3]])
             previsoes_futuras = modelo_ia.predict(futuro_dias)
             
-            # Monta os cartões visuais da previsão na tela
             st.info("💡 A inteligência artificial analisou o histórico de entradas e calculou a tendência para os próximos dias:")
             pc1, pc2, pc3 = st.columns(3)
             pc1.metric("🔮 Dia +1 (Amanhã)", f"R$ {max(0.0, previsoes_futuras[0]):,.2f}")
@@ -259,9 +253,27 @@ with aba_financeiro:
         
         st.markdown("---")
         st.markdown("**Histórico de Transações do Caixa:**")
-        # Força exibição textual amigável da data na tabela
         df_exibir = df_fin.copy()
         df_exibir['data_pagamento'] = df_exibir['data_pagamento'].dt.strftime('%d/%m/%Y')
         st.dataframe(df_exibir[["id", "pedido_id", "valor_venda", "custo_total", "lucro_liquido", "status_financeiro", "data_pagamento"]], use_container_width=True)
+        
+        # --- NOVO: ENTRADA DE BAIXA DO FINANCEIRO ---
+        st.markdown("---")
+        st.markdown("**Confirmar Recebimento de Valor:**")
+        fcol1, fcol2 = st.columns([1, 1])
+        
+        with fcol1:
+            fid = st.number_input("Digite o ID do Lançamento para dar baixa:", min_value=1, step=1, key="financeiro_id")
+        with fcol2:
+            novo_status_fin = st.selectbox("Alterar Status Financeiro para:", ["Pendente", "Pago"], key="financeiro_status")
+            
+        if st.button("Confirmar Baixa de Caixa", type="primary"):
+            try:
+                supabase.table("vendas_e_financas").update({"status_financeiro": novo_status_fin}).eq("id", fid).execute()
+                st.success(f"Lançamento #{fid} atualizado para {novo_status_fin} com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao atualizar status financeiro: {e}")
+                
     else:
         st.info("Nenhuma movimentação financeira registrada.")
