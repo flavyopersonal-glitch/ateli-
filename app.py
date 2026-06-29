@@ -21,7 +21,7 @@ except Exception:
     conexao_ok = False
 
 st.set_page_config(page_title="PCP Ateliê Pro", layout="wide")
-st.title("🏭 Sistema de Gestão PCP & Fábrica (Agenda Industrial + IA)")
+st.title("🏭 Sistema de Gestão PCP & Fábrica")
 st.markdown("---")
 
 if not conexao_ok:
@@ -38,10 +38,11 @@ def calcular_proximo_dia_util(data_atual):
     return amanha
 
 # 2. ABAS DO SISTEMA
-aba_producao, aba_estoque, aba_financeiro = st.tabs([
+aba_producao, aba_estoque, aba_financeiro, aba_config = st.tabs([
     "📦 Linha de Produção & Prazos", 
     "🪵 Controle de Estoque", 
-    "💰 Controle de Caixa & Lucro + Previsão IA"
+    "💰 Controle de Caixa & Lucro + Previsão IA",
+    "⚙️ Configurações & Sistema"
 ])
 
 # ==========================================
@@ -87,7 +88,7 @@ with aba_producao:
                     }
                     supabase.table("vendas_e_financas").insert(financeiro_data).execute()
                     st.success(f"Pedido de {cliente} registrado com sucesso!")
-                    st.experimental_rerun()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar dados: {e}")
 
@@ -168,7 +169,7 @@ with aba_producao:
             if st.button("Atualizar Status"):
                 supabase.table("pedidos").update({"status_producao": novo_status}).eq("id", pid).execute()
                 st.success(f"Status do pedido #{pid} alterado!")
-                st.experimental_rerun()
+                st.rerun()
         else:
             st.info("Nenhum pedido na fila de produção.")
 
@@ -176,7 +177,7 @@ with aba_producao:
 # ABA 2: CONTROLE DE ESTOQUE
 # ==========================================
 with aba_estoque:
-    st.subheader("🪵 Gerenciamento de Materials")
+    st.subheader("🪵 Gerenciamento de Materiais")
     ec1, ec2 = st.columns([1, 2])
     
     with ec1:
@@ -192,7 +193,7 @@ with aba_estoque:
                 estoque_data = {"item_nome": item, "quantidade_atual": qtd_atual, "quantidade_minima": qtd_min, "preco_custo": custo_un}
                 supabase.table("estoque").insert(estoque_data).execute()
                 st.success(f"{item} adicionado!")
-                st.experimental_rerun()
+                st.rerun()
                 
     with ec2:
         res_est = supabase.table("estoque").select("*").execute()
@@ -257,7 +258,7 @@ with aba_financeiro:
         df_exibir['data_pagamento'] = df_exibir['data_pagamento'].dt.strftime('%d/%m/%Y')
         st.dataframe(df_exibir[["id", "pedido_id", "valor_venda", "custo_total", "lucro_liquido", "status_financeiro", "data_pagamento"]], use_container_width=True)
         
-        # --- NOVO: ENTRADA DE BAIXA DO FINANCEIRO ---
+        # --- ENTRADA DE BAIXA DO FINANCEIRO ---
         st.markdown("---")
         st.markdown("**Confirmar Recebimento de Valor:**")
         fcol1, fcol2 = st.columns([1, 1])
@@ -270,10 +271,67 @@ with aba_financeiro:
         if st.button("Confirmar Baixa de Caixa", type="primary"):
             try:
                 supabase.table("vendas_e_financas").update({"status_financeiro": novo_status_fin}).eq("id", fid).execute()
-                st.success(f"Lançamento #{fid} atualizado para {novo_status_fin} com sucesso!")
-                st.experimental_rerun()
+                st.success(f"Lançamento #{fid} updated para {novo_status_fin} com sucesso!")
+                st.rerun()
             except Exception as e:
                 st.error(f"Erro ao atualizar status financeiro: {e}")
                 
     else:
         st.info("Nenhuma movimentação financeira registrada.")
+
+# ==========================================
+# NOVA ABA 4: CONFIGURAÇÕES & SISTEMA
+# ==========================================
+with aba_config:
+    st.subheader("⚙️ Painel de Controle e Manutenção do Sistema")
+    st.markdown("---")
+    
+    # SEÇÃO 1: BACKUP TOTAL DE DADOS
+    st.markdown("### 💾 Backup de Segurança")
+    st.write("Baixe todas as tabelas do sistema em formato CSV para salvar em seu computador.")
+    
+    if st.button("Gerar Arquivos de Backup"):
+        try:
+            # Puxa os dados brutos de todas as tabelas do Supabase
+            b_pedidos = supabase.table("pedidos").select("*").execute().data
+            b_financas = supabase.table("vendas_e_financas").select("*").execute().data
+            b_estoque = supabase.table("estoque").select("*").execute().data
+            
+            # Converte para CSV em texto string simples
+            csv_pedidos = pd.DataFrame(b_pedidos).to_csv(index=False).encode('utf-8')
+            csv_financas = pd.DataFrame(b_financas).to_csv(index=False).encode('utf-8')
+            csv_estoque = pd.DataFrame(b_estoque).to_csv(index=False).encode('utf-8')
+            
+            st.success("✅ Arquivos de backup gerados com sucesso! Clique nos botões abaixo para baixar:")
+            
+            # Cria os botões de download nativos do navegador
+            st.download_button("📥 Baixar Tabela de Pedidos", data=csv_pedidos, file_name="backup_pedidos.csv", mime="text/csv")
+            st.download_button("📥 Baixar Tabela de Finanças", data=csv_financas, file_name="backup_financas.csv", mime="text/csv")
+            st.download_button("📥 Baixar Tabela de Estoque", data=csv_estoque, file_name="backup_estoque.csv", mime="text/csv")
+        except Exception as e:
+            st.error(f"Não foi possível gerar o backup: {e}")
+            
+    st.markdown("---")
+    
+    # SEÇÃO 2: REINICIAR SISTEMA (Zerar Tudo)
+    st.markdown("### 🚨 Área de Perigo: Reiniciar Sistema")
+    st.warning("Atenção: A ação abaixo apagará permanentemente todos os pedidos, finanças e estoque salvos no banco de dados!")
+    
+    # Caixa de confirmação de segurança para evitar cliques acidentais
+    confirmacao = st.checkbox("Estou ciente de que esta ação é irreversível e quero apagar tudo.")
+    
+    if st.button("⚠️ APAGAR TODOS OS DADOS DO BANCO", type="secondary"):
+        if confirmacao:
+            try:
+                # Deleta os dados respeitando a integridade das chaves estrangeiras
+                # Primeiro a tabela dependente (finanças), depois a principal (pedidos)
+                supabase.table("vendas_e_financas").delete().neq("id", 0).execute()
+                supabase.table("pedidos").delete().neq("id", 0).execute()
+                supabase.table("estoque").delete().neq("id", 0).execute()
+                
+                st.success("💥 Sistema reiniciado com sucesso! Todos os dados foram apagados.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao limpar o banco de dados: {e}")
+        else:
+            st.error("❌ Operação cancelada. Você precisa marcar a caixa de confirmação antes de clicar no botão.")
