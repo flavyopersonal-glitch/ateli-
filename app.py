@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from urllib.parse import quote
 import streamlit as st
 import pandas as pd
@@ -23,7 +24,12 @@ except Exception:
     conexao_ok = False
 
 st.set_page_config(page_title="PCP Ateliê Pro", layout="wide")
-st.image("logo.jpeg", width=220)
+app_dir = Path(__file__).resolve().parent
+logo_path = app_dir / "logo.jpeg"
+if logo_path.exists():
+    st.image(str(logo_path), width=220)
+else:
+    st.warning("Logo não encontrada. Coloque 'logo.jpeg' na mesma pasta de app.py.")
 st.title("🏭 Sistema de Gestão PCP & Fábrica")
 st.markdown("---")
 
