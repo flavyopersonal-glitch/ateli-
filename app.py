@@ -103,26 +103,30 @@ st.markdown(
             position: sticky;
             top: 0;
             z-index: 99;
-            background: #111827;
-            padding-top: 1.2rem;
-            padding-bottom: 1.2rem;
+            background: linear-gradient(90deg, #0f172a 0%, #111827 100%);
+            padding: 1.6rem 2rem;
             margin-bottom: 1.5rem;
-            border-bottom: 1px solid #1f2937;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
         }
         .header-block {
-            text-align: center;
+            text-align: left;
             width: 100%;
         }
         .header-title {
             margin-bottom: 0.2rem;
             color: #ffffff;
+            font-size: 3rem;
+            font-weight: 800;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
         }
         .header-subtitle {
             margin-top: 0;
-            color: #cbd5e1;
-            font-size: 0.95rem;
+            color: #e2e8f0;
+            font-size: 1rem;
             font-style: italic;
-            letter-spacing: 0.12em;
+            letter-spacing: 0.16em;
+            text-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
         }
     </style>
     """,
