@@ -24,13 +24,141 @@ except Exception:
     conexao_ok = False
 
 st.set_page_config(page_title="PCP Ateliê Pro", layout="wide")
+
+# Estilo visual para uma aparência mais profissional
+st.markdown(
+    """
+    <style>
+        .stApp {
+            background: #f4f7fb;
+            color: #0f172a;
+        }
+        .title-block {
+            font-size: 2.8rem;
+            font-weight: 700;
+            color: #111827;
+            margin: 0;
+        }
+        .subtitle {
+            color: #475569;
+            font-size: 1rem;
+            margin-top: 0.25rem;
+            margin-bottom: 0.75rem;
+        }
+        .section-card {
+            background: #ffffff;
+            border-radius: 24px;
+            padding: 1.75rem;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+            margin-bottom: 1.75rem;
+            border: 1px solid #e2e8f0;
+        }
+        .section-card h2 {
+            color: #0f172a;
+            font-size: 1.45rem;
+            margin-bottom: 0.35rem;
+        }
+        .section-subtitle {
+            color: #64748b;
+            margin-top: -0.1rem;
+            margin-bottom: 1.15rem;
+            font-size: 0.95rem;
+        }
+        .stButton>button {
+            border-radius: 14px;
+            padding: 0.8rem 1.6rem;
+            background-color: #0f172a;
+            color: white;
+            border: none;
+            font-weight: 600;
+        }
+        .stButton>button:hover {
+            background-color: #111827;
+        }
+        .stMetric {
+            background: #f8fafc;
+            border-radius: 18px;
+            padding: 1rem 1.2rem;
+        }
+        .css-1lsmgbg.e16nr0p32 {
+            box-shadow: none;
+        }
+        .stTextInput>div>div>input,
+        .stTextArea>div>div>textarea,
+        .stNumberInput>div>div>input {
+            border-radius: 12px;
+            border: 1px solid #d1d5db;
+            background: #f8fafc;
+            padding: 0.8rem 1rem;
+        }
+        .stSelectbox>div>div>div>div {
+            border-radius: 12px;
+            background: #f8fafc;
+            border: 1px solid #d1d5db;
+        }
+        .st-expander > div {
+            border-radius: 18px;
+        }
+        .app-header {
+            position: sticky;
+            top: 0;
+            z-index: 99;
+            background: #111827;
+            padding-top: 1.2rem;
+            padding-bottom: 1.2rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid #1f2937;
+        }
+        .header-block {
+            text-align: center;
+            width: 100%;
+        }
+        .header-title {
+            margin-bottom: 0.2rem;
+            color: #ffffff;
+        }
+        .header-subtitle {
+            margin-top: 0;
+            color: #cbd5e1;
+            font-size: 0.95rem;
+            font-style: italic;
+            letter-spacing: 0.12em;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 app_dir = Path(__file__).resolve().parent
 logo_path = app_dir / "logo.jpeg"
-if logo_path.exists():
-    st.image(str(logo_path), width=220)
+with st.container():
+    st.markdown('<div class="app-header">', unsafe_allow_html=True)
+    header_cols = st.columns([1, 4])
+    with header_cols[0]:
+        if logo_path.exists():
+            st.image(str(logo_path), width=120)
+    with header_cols[1]:
+        st.markdown('<div class="header-block"><h1 class="title-block header-title">ATELIÊ CRISTO REI</h1><p class="header-subtitle">ADVÉNIAT REGNUM TUUM</p></div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Painel resumo executivo
+if conexao_ok:
+    try:
+        pedidos_resumo = supabase.table("pedidos").select("*").execute().data or []
+        total_pedidos = len(pedidos_resumo)
+        pedidos_urgentes = sum(1 for pedido in pedidos_resumo if pedido.get("status_urgente"))
+    except Exception:
+        total_pedidos = 0
+        pedidos_urgentes = 0
 else:
-    st.warning("Logo não encontrada. Coloque 'logo.jpeg' na mesma pasta de app.py.")
-st.title("🏭 Sistema de Gestão PCP & Fábrica")
+    total_pedidos = 0
+    pedidos_urgentes = 0
+
+metric_col1, metric_col2, metric_col3 = st.columns([1, 1, 2])
+metric_col1.metric("Pedidos ativos", total_pedidos)
+metric_col2.metric("Pedidos urgentes", pedidos_urgentes)
+metric_col3.markdown("**Painel de controle com visão clara para tomada de decisão e entrega de prazos.**")
+
 st.markdown("---")
 
 if not conexao_ok:
@@ -46,23 +174,29 @@ def calcular_proximo_dia_util(data_atual):
         amanha += timedelta(days=1)
     return amanha
 
+def begin_section(title, subtitle=""):
+    st.markdown(f"<div class='section-card'><h2>{title}</h2><p class='section-subtitle'>{subtitle}</p>", unsafe_allow_html=True)
+
+def end_section():
+    st.markdown("</div>", unsafe_allow_html=True)
+
 # 2. ABAS DO SISTEMA
 aba_producao, aba_estoque, aba_financeiro, aba_orcamento, aba_config = st.tabs([
-    "📦 Linha de Produção & Prazos", 
-    "🪵 Controle de Estoque", 
-    "💰 Controle de Caixa & Lucro + Previsão IA",
-    "💼 Orçamento",
-    "⚙️ Configurações & Sistema"
+    "Produção", 
+    "Estoque", 
+    "Finanças",
+    "Orçamentos",
+    "Configurações"
 ])
 
 # ==========================================
 # ABA 1: LINHA DE PRODUÇÃO & PRAZOS
 # ==========================================
 with aba_producao:
+    begin_section("Cadastrar Pedido", "Registre pedidos com prioridade e dados completos para a produção.")
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        st.subheader("📝 Cadastrar Pedido")
         with st.form("form_novo_pedido", clear_on_submit=True):
             cliente = st.text_input("Nome do Cliente")
             descricao_servico = st.text_area(
@@ -72,7 +206,7 @@ with aba_producao:
             )
             horas = st.number_input("Horas de Produção Necessárias", min_value=0.5, step=0.5, value=2.0)
             data_solicitada = st.date_input("Prazo solicitado pelo cliente", min_value=datetime.today())
-            urgente = st.checkbox("🔥 PEDIDO URGENTE (Furar Fila)")
+            urgente = st.checkbox("Pedido urgente (prioridade de produção)")
             
             st.markdown("**Dados de Venda:**")
             valor_venda = st.number_input("Valor da Venda (R$)", min_value=0.0, step=10.0, value=100.0)
@@ -112,9 +246,10 @@ with aba_producao:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar dados: {e}")
+    end_section()
 
     with col2:
-        st.subheader("📊 Agenda de Fábrica (Segunda a Sexta - 8h/dia)")
+        begin_section("📊 Agenda de Fábrica", "Visualize a fila, prazos e alertas de entrega em uma visão clara.")
         res = supabase.table("pedidos").select("*").execute()
         
         if res.data:
@@ -164,21 +299,21 @@ with aba_producao:
             alertas = []
             for idx, row in df.iterrows():
                 if row["status_producao"] == "Finalizado":
-                    alertas.append("✅ Finalizado")
+                    alertas.append("Finalizado")
                     continue
                 prog = datetime.strptime(str(row["data_programada_producao"]), "%Y-%m-%d").date()
                 solic = datetime.strptime(str(row["data_solicitada_cliente"]), "%Y-%m-%d").date()
                 if prog > solic:
-                    alertas.append("⚠️ ATRASARÁ")
+                    alertas.append("Atraso previsto")
                 else:
-                    alertas.append("✅ No Prazo")
+                    alertas.append("No prazo")
             df["Alerta Prazo"] = alertas
             
             st.dataframe(
                 df[["id", "cliente", "descricao_servico", "horas_necessarias", "Tempo de Fábrica", "status_urgente", "data_solicitada_cliente", "data_programada_producao", "Alerta Prazo", "status_producao"]],
                 column_config={
                     "horas_necessarias": "Horas Totais",
-                    "status_urgente": "🔥 Urgente",
+                    "status_urgente": "Urgente",
                     "data_solicitada_cliente": "Prazo Solicitado",
                     "data_programada_producao": "Data Prevista de Entrega",
                 },
@@ -194,16 +329,15 @@ with aba_producao:
                 st.rerun()
         else:
             st.info("Nenhum pedido na fila de produção.")
-
-# ==========================================
+    end_section()
 # ABA 2: CONTROLE DE ESTOQUE
 # ==========================================
 with aba_estoque:
-    st.subheader("🪵 Gerenciamento de Materiais")
+    begin_section("Gerenciamento de Materiais", "Controle o estoque com alertas de reposição e custos detalhados.")
     ec1, ec2 = st.columns([1, 2])
     
     with ec1:
-        st.markdown("**Adicionar/Atualizar Material**")
+        st.markdown("**Adicionar/Atualizar Materiais**")
         with st.form("form_estoque", clear_on_submit=True):
             item = st.text_input("Nome da Matéria-Prima")
             qtd_atual = st.number_input("Quantidade em Estoque", min_value=0.0, step=1.0)
@@ -221,16 +355,17 @@ with aba_estoque:
         res_est = supabase.table("estoque").select("*").execute()
         if res_est.data:
             df_est = pd.DataFrame(res_est.data)
-            df_est["Status Material"] = df_est.apply(lambda r: "🚨 COMPRAR DO FORNECEDOR" if r["quantidade_atual"] <= r["quantidade_minima"] else "✅ OK", axis=1)
+            df_est["Status Material"] = df_est.apply(lambda r: "Comprar do fornecedor" if r["quantidade_atual"] <= r["quantidade_minima"] else "Em nível seguro", axis=1)
             st.dataframe(df_est[["id", "item_nome", "quantidade_atual", "quantidade_minima", "preco_custo", "Status Material"]], use_container_width=True)
         else:
             st.info("Estoque vazio.")
+    end_section()
 
 # ==========================================
 # ABA 3: CONTROLE DE CAIXA & IA PREVISÃO
 # ==========================================
 with aba_financeiro:
-    st.subheader("💰 Fluxo Financeiro e Margem de Lucro")
+    begin_section("Finanças e Previsões", "Monitore receita, margem e a tendência de faturamento com inteligência.")
     
     res_fin = supabase.table("vendas_e_financas").select("*").execute()
     if res_fin.data:
@@ -241,13 +376,13 @@ with aba_financeiro:
         lucro_total = df_fin["lucro_liquido"].sum()
         
         m1, m2, m3 = st.columns(3)
-        m1.metric("💰 Faturamento Bruto Total", f"R$ {faturamento_total:,.2f}")
-        m2.metric("📉 Custo de Produção Total", f"R$ {custos_totais:,.2f}")
-        m3.metric("📈 Lucro Líquido Real", f"R$ {lucro_total:,.2f}", delta=f"{((lucro_total/faturamento_total)*100 if faturamento_total > 0 else 0):.1f}% Margem")
+        m1.metric("Faturamento Bruto Total", f"R$ {faturamento_total:,.2f}")
+        m2.metric("Custo de Produção Total", f"R$ {custos_totais:,.2f}")
+        m3.metric("Lucro Líquido Real", f"R$ {lucro_total:,.2f}", delta=f"{((lucro_total/faturamento_total)*100 if faturamento_total > 0 else 0):.1f}% Margem")
         
         # --- BLOCO: INTELIGÊNCIA ARTIFICIAL ---
         st.markdown("---")
-        st.subheader("🤖 Previsão de Tendência de Faturamento com IA")
+        st.subheader("Previsão de Tendência de Faturamento")
         
         df_fin['data_pagamento'] = pd.to_datetime(df_fin['data_pagamento'])
         df_agrupado = df_fin.groupby('data_pagamento')['valor_venda'].sum().reset_index().sort_values('data_pagamento')
@@ -272,7 +407,7 @@ with aba_financeiro:
             pc2.metric("🔮 Dia +2", f"R$ {max(0.0, previsoes_futuras[1]):,.2f}")
             pc3.metric("🔮 Dia +3", f"R$ {max(0.0, previsoes_futuras[2]):,.2f}")
         else:
-            st.warning("🤖 IA Aguardando Dados: Cadastre movimentações financeiras em pelo menos 2 datas diferentes para treinar a inteligência.")
+            st.warning("Aguardando dados: cadastre movimentações financeiras em pelo menos duas datas diferentes para treinar o modelo.")
         
         st.markdown("---")
         st.markdown("**Histórico de Transações do Caixa:**")
@@ -300,13 +435,11 @@ with aba_financeiro:
                 
     else:
         st.info("Nenhuma movimentação financeira registrada.")
-
-# ==========================================
+    end_section()
 # ABA 4: ORÇAMENTO
 # ==========================================
 with aba_orcamento:
-    st.subheader("💼 Orçamento e Proposta")
-    st.write("Simule um orçamento rápido para o cliente com base em horas, materiais e margem desejada.")
+    begin_section("Orçamentos Profissionais", "Gere propostas elegantes em PDF e envie automaticamente pelo WhatsApp.")
 
     with st.form("form_orcamento", clear_on_submit=True):
         nome_servico = st.text_input("Nome do Serviço")
@@ -358,9 +491,9 @@ with aba_orcamento:
                     st.warning(f"Orçamento calculado, mas não foi possível salvar no banco: {e2}")
 
             col_orc1, col_orc2, col_orc3 = st.columns(3)
-            col_orc1.metric("💵 Custo Total", f"R$ {custo_total:,.2f}")
-            col_orc2.metric("📈 Valor do Orçamento", f"R$ {valor_orcamento:,.2f}")
-            col_orc3.metric("💡 Lucro Estimado", f"R$ {lucro_estimado:,.2f}")
+            col_orc1.metric("Custo Total", f"R$ {custo_total:,.2f}")
+            col_orc2.metric("Valor do Orçamento", f"R$ {valor_orcamento:,.2f}")
+            col_orc3.metric("Lucro Estimado", f"R$ {lucro_estimado:,.2f}")
 
             with st.expander("Detalhes do orçamento"):
                 st.write(f"**Descrição:** {descricao_orcamento or 'Sem descrição adicional.'}")
@@ -368,34 +501,38 @@ with aba_orcamento:
                 st.write(f"**Margem desejada:** {margem_desejada}%")
                 st.write(f"**Status:** {status_orcamento}")
 
-            if telefone_whatsapp:
-                url_whatsapp = gerar_link_whatsapp(telefone_whatsapp, nome_servico, valor_orcamento, status_orcamento)
-                st.link_button("📱 Enviar por WhatsApp", url_whatsapp)
+            pdf_bytes = gerar_pdf_orcamento({
+                "nome_servico": nome_servico,
+                "descricao_orcamento": descricao_orcamento,
+                "horas_estimadas": horas_orcamento,
+                "custo_material": custo_material_orcamento,
+                "valor_hora": valor_hora,
+                "margem_desejada": margem_desejada,
+                "custo_total": custo_total,
+                "valor_orcamento": valor_orcamento,
+                "lucro_estimado": lucro_estimado,
+                "status_orcamento": status_orcamento,
+                "telefone_whatsapp": telefone_whatsapp,
+            }, logo_path=str(logo_path) if logo_path.exists() else None)
 
-                pdf_bytes = gerar_pdf_orcamento({
-                    "nome_servico": nome_servico,
-                    "descricao_orcamento": descricao_orcamento,
-                    "horas_estimadas": horas_orcamento,
-                    "custo_material": custo_material_orcamento,
-                    "valor_hora": valor_hora,
-                    "margem_desejada": margem_desejada,
-                    "custo_total": custo_total,
-                    "valor_orcamento": valor_orcamento,
-                    "lucro_estimado": lucro_estimado,
-                    "status_orcamento": status_orcamento,
-                    "telefone_whatsapp": telefone_whatsapp,
-                })
+            btn_col1, btn_col2 = st.columns([1, 1])
+            with btn_col1:
                 st.download_button(
-                    "📄 Baixar PDF do orçamento",
+                    "Baixar PDF do orçamento",
                     data=pdf_bytes,
                     file_name=f"orcamento_{nome_servico.lower().replace(' ', '_')}.pdf",
                     mime="application/pdf"
                 )
-            else:
-                st.info("Informe um telefone/WhatsApp para ativar o botão de envio.")
+            with btn_col2:
+                if telefone_whatsapp:
+                    url_whatsapp = gerar_link_whatsapp(telefone_whatsapp, nome_servico, valor_orcamento, status_orcamento)
+                    st.link_button("Enviar por WhatsApp", url_whatsapp)
+                else:
+                    st.info("Preencha o telefone/WhatsApp para ativar o envio.")
 
+    end_section()
     st.markdown("---")
-    st.subheader("📋 Orçamentos Salvos")
+    begin_section("Orçamentos Salvos", "Acompanhe o histórico de propostas e atualize seus status com agilidade.")
 
     status_id = st.number_input("ID do orçamento para atualizar status", min_value=1, step=1, key="orc_update_id")
     novo_status = st.selectbox("Novo status", ["Pendente", "Enviado", "Aprovado", "Recusado"], key="orc_update_status")
@@ -419,13 +556,13 @@ with aba_orcamento:
             st.info("Nenhum orçamento salvo ainda.")
     except Exception as e:
         st.info("Ainda não há orçamentos salvos ou a tabela não está disponível no momento.")
+    end_section()
 
 # ==========================================
 # ABA 5: CONFIGURAÇÕES & SISTEMA
 # ==========================================
 with aba_config:
-    st.subheader("⚙️ Painel de Controle e Manutenção do Sistema")
-    st.markdown("---")
+    begin_section("Configurações do Sistema", "Ajuste o app, faça backups e mantenha o ateliê sempre organizado.")
     
     # SEÇÃO 1: BACKUP TOTAL DE DADOS
     st.markdown("### 💾 Backup de Segurança")
@@ -443,7 +580,7 @@ with aba_config:
             csv_financas = pd.DataFrame(b_financas).to_csv(index=False).encode('utf-8')
             csv_estoque = pd.DataFrame(b_estoque).to_csv(index=False).encode('utf-8')
             
-            st.success("✅ Arquivos de backup gerados com sucesso! Clique nos botões abaixo para baixar:")
+            st.success("Arquivos de backup gerados com sucesso. Use os botões abaixo para baixar.")
             
             # Cria os botões de download nativos do navegador
             st.download_button("📥 Baixar Tabela de Pedidos", data=csv_pedidos, file_name="backup_pedidos.csv", mime="text/csv")
@@ -455,13 +592,13 @@ with aba_config:
     st.markdown("---")
     
     # SEÇÃO 2: REINICIAR SISTEMA (Zerar Tudo)
-    st.markdown("### 🚨 Área de Perigo: Reiniciar Sistema")
+    st.markdown("### Área de Perigo: Reiniciar Sistema")
     st.warning("Atenção: A ação abaixo apagará permanentemente todos os pedidos, finanças e estoque salvos no banco de dados!")
     
     # Caixa de confirmação de segurança para evitar cliques acidentais
     confirmacao = st.checkbox("Estou ciente de que esta ação é irreversível e quero apagar tudo.")
     
-    if st.button("⚠️ APAGAR TODOS OS DADOS DO BANCO", type="secondary"):
+    if st.button("Apagar todos os dados do banco", type="secondary"):
         if confirmacao:
             try:
                 # Deleta os dados respeitando a integridade das chaves estrangeiras
