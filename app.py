@@ -121,12 +121,13 @@ st.markdown(
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
         }
         .header-subtitle {
-            margin-top: 0;
-            color: #e2e8f0;
-            font-size: 1rem;
-            font-style: italic;
+            margin-top: 0.25rem;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.05rem;
+            font-weight: 500;
             letter-spacing: 0.16em;
-            text-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+            text-shadow: 0 1px 6px rgba(0, 0, 0, 0.22);
+            opacity: 1;
         }
     </style>
     """,
