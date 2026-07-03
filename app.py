@@ -1,10 +1,12 @@
 import os
+from urllib.parse import quote
 import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from orcamento_utils import gerar_link_whatsapp, gerar_pdf_orcamento
 
 # Importação da IA (Scikit-Learn)
 from sklearn.linear_model import LinearRegression
@@ -21,6 +23,7 @@ except Exception:
     conexao_ok = False
 
 st.set_page_config(page_title="PCP Ateliê Pro", layout="wide")
+st.image("logo.jpeg", width=220)
 st.title("🏭 Sistema de Gestão PCP & Fábrica")
 st.markdown("---")
 
@@ -38,10 +41,11 @@ def calcular_proximo_dia_util(data_atual):
     return amanha
 
 # 2. ABAS DO SISTEMA
-aba_producao, aba_estoque, aba_financeiro, aba_config = st.tabs([
+aba_producao, aba_estoque, aba_financeiro, aba_orcamento, aba_config = st.tabs([
     "📦 Linha de Produção & Prazos", 
     "🪵 Controle de Estoque", 
     "💰 Controle de Caixa & Lucro + Previsão IA",
+    "💼 Orçamento",
     "⚙️ Configurações & Sistema"
 ])
 
@@ -55,6 +59,11 @@ with aba_producao:
         st.subheader("📝 Cadastrar Pedido")
         with st.form("form_novo_pedido", clear_on_submit=True):
             cliente = st.text_input("Nome do Cliente")
+            descricao_servico = st.text_area(
+                "Descrição do Serviço",
+                placeholder="Descreva o serviço, detalhes, acabamento e observações importantes...",
+                height=120
+            )
             horas = st.number_input("Horas de Produção Necessárias", min_value=0.5, step=0.5, value=2.0)
             data_solicitada = st.date_input("Prazo solicitado pelo cliente", min_value=datetime.today())
             urgente = st.checkbox("🔥 PEDIDO URGENTE (Furar Fila)")
@@ -69,12 +78,18 @@ with aba_producao:
                 try:
                     pedido_data = {
                         "cliente": cliente,
+                        "descricao_servico": descricao_servico,
                         "horas_necessarias": horas,
                         "data_solicitada_cliente": str(data_solicitada),
                         "status_urgente": urgente,
                         "status_producao": "Na Fila"
                     }
-                    res_pedido = supabase.table("pedidos").insert(pedido_data).execute()
+                    try:
+                        res_pedido = supabase.table("pedidos").insert(pedido_data).execute()
+                    except Exception as erro_coluna:
+                        pedido_data_sem_descricao = {k: v for k, v in pedido_data.items() if k != "descricao_servico"}
+                        res_pedido = supabase.table("pedidos").insert(pedido_data_sem_descricao).execute()
+                        st.warning("A descrição do serviço foi recebida, mas a coluna de banco ainda não está disponível. O pedido foi salvo sem esse campo.")
                     pedido_id = res_pedido.data[0]["id"]
                     
                     lucro = valor_venda - custo_material
@@ -138,6 +153,7 @@ with aba_producao:
             
             df["data_programada_producao"] = datas_conclusao
             df["Tempo de Fábrica"] = dias_necessarios_lista
+            df["descricao_servico"] = df.get("descricao_servico", pd.Series([""] * len(df)))
             
             alertas = []
             for idx, row in df.iterrows():
@@ -153,7 +169,7 @@ with aba_producao:
             df["Alerta Prazo"] = alertas
             
             st.dataframe(
-                df[["id", "cliente", "horas_necessarias", "Tempo de Fábrica", "status_urgente", "data_solicitada_cliente", "data_programada_producao", "Alerta Prazo", "status_producao"]],
+                df[["id", "cliente", "descricao_servico", "horas_necessarias", "Tempo de Fábrica", "status_urgente", "data_solicitada_cliente", "data_programada_producao", "Alerta Prazo", "status_producao"]],
                 column_config={
                     "horas_necessarias": "Horas Totais",
                     "status_urgente": "🔥 Urgente",
@@ -280,7 +296,126 @@ with aba_financeiro:
         st.info("Nenhuma movimentação financeira registrada.")
 
 # ==========================================
-# NOVA ABA 4: CONFIGURAÇÕES & SISTEMA
+# ABA 4: ORÇAMENTO
+# ==========================================
+with aba_orcamento:
+    st.subheader("💼 Orçamento e Proposta")
+    st.write("Simule um orçamento rápido para o cliente com base em horas, materiais e margem desejada.")
+
+    with st.form("form_orcamento", clear_on_submit=True):
+        nome_servico = st.text_input("Nome do Serviço")
+        descricao_orcamento = st.text_area(
+            "Descrição do Orçamento",
+            placeholder="Descreva o serviço, acabamento e itens inclusos...",
+            height=100
+        )
+        horas_orcamento = st.number_input("Horas estimadas", min_value=0.5, step=0.5, value=2.0, key="orc_horas")
+        custo_material_orcamento = st.number_input("Custo estimado de material (R$)", min_value=0.0, step=5.0, value=30.0, key="orc_material")
+        valor_hora = st.number_input("Valor da hora de produção (R$)", min_value=0.0, step=5.0, value=60.0, key="orc_valor_hora")
+        margem_desejada = st.number_input("Margem desejada (%)", min_value=0.0, max_value=100.0, step=1.0, value=30.0, key="orc_margem")
+        status_orcamento = st.selectbox("Status do Orçamento", ["Pendente", "Enviado", "Aprovado", "Recusado"], key="orc_status")
+        telefone_whatsapp = st.text_input("Telefone/WhatsApp", placeholder="5511999999999", key="orc_tel")
+
+        submit_orcamento = st.form_submit_button("Calcular e Salvar Orçamento")
+
+        if submit_orcamento and nome_servico:
+            custo_hora = horas_orcamento * valor_hora
+            custo_total = custo_hora + custo_material_orcamento
+            margem_decimal = margem_desejada / 100
+            valor_orcamento = custo_total / (1 - margem_decimal) if margem_decimal < 1 else custo_total
+            lucro_estimado = valor_orcamento - custo_total
+
+            orcamento_data = {
+                "nome_servico": nome_servico,
+                "descricao_orcamento": descricao_orcamento,
+                "horas_estimadas": horas_orcamento,
+                "custo_material": custo_material_orcamento,
+                "valor_hora": valor_hora,
+                "margem_desejada": margem_desejada,
+                "custo_total": custo_total,
+                "valor_orcamento": valor_orcamento,
+                "lucro_estimado": lucro_estimado,
+                "status_orcamento": status_orcamento,
+                "telefone_whatsapp": telefone_whatsapp,
+                "data_criacao": str(datetime.now())
+            }
+
+            try:
+                supabase.table("orcamentos").insert(orcamento_data).execute()
+                st.success(f"Orçamento preparado e salvo para {nome_servico}")
+            except Exception as e:
+                try:
+                    dados_fallback = {k: v for k, v in orcamento_data.items() if k not in {"descricao_orcamento", "telefone_whatsapp"}}
+                    supabase.table("orcamentos").insert(dados_fallback).execute()
+                    st.success(f"Orçamento preparado e salvo para {nome_servico}")
+                except Exception as e2:
+                    st.warning(f"Orçamento calculado, mas não foi possível salvar no banco: {e2}")
+
+            col_orc1, col_orc2, col_orc3 = st.columns(3)
+            col_orc1.metric("💵 Custo Total", f"R$ {custo_total:,.2f}")
+            col_orc2.metric("📈 Valor do Orçamento", f"R$ {valor_orcamento:,.2f}")
+            col_orc3.metric("💡 Lucro Estimado", f"R$ {lucro_estimado:,.2f}")
+
+            with st.expander("Detalhes do orçamento"):
+                st.write(f"**Descrição:** {descricao_orcamento or 'Sem descrição adicional.'}")
+                st.write(f"**Horas estimadas:** {horas_orcamento}")
+                st.write(f"**Margem desejada:** {margem_desejada}%")
+                st.write(f"**Status:** {status_orcamento}")
+
+            if telefone_whatsapp:
+                url_whatsapp = gerar_link_whatsapp(telefone_whatsapp, nome_servico, valor_orcamento, status_orcamento)
+                st.link_button("📱 Enviar por WhatsApp", url_whatsapp)
+
+                pdf_bytes = gerar_pdf_orcamento({
+                    "nome_servico": nome_servico,
+                    "descricao_orcamento": descricao_orcamento,
+                    "horas_estimadas": horas_orcamento,
+                    "custo_material": custo_material_orcamento,
+                    "valor_hora": valor_hora,
+                    "margem_desejada": margem_desejada,
+                    "custo_total": custo_total,
+                    "valor_orcamento": valor_orcamento,
+                    "lucro_estimado": lucro_estimado,
+                    "status_orcamento": status_orcamento,
+                    "telefone_whatsapp": telefone_whatsapp,
+                })
+                st.download_button(
+                    "📄 Baixar PDF do orçamento",
+                    data=pdf_bytes,
+                    file_name=f"orcamento_{nome_servico.lower().replace(' ', '_')}.pdf",
+                    mime="application/pdf"
+                )
+            else:
+                st.info("Informe um telefone/WhatsApp para ativar o botão de envio.")
+
+    st.markdown("---")
+    st.subheader("📋 Orçamentos Salvos")
+
+    status_id = st.number_input("ID do orçamento para atualizar status", min_value=1, step=1, key="orc_update_id")
+    novo_status = st.selectbox("Novo status", ["Pendente", "Enviado", "Aprovado", "Recusado"], key="orc_update_status")
+    if st.button("Atualizar status do orçamento"):
+        try:
+            supabase.table("orcamentos").update({"status_orcamento": novo_status}).eq("id", status_id).execute()
+            st.success("Status atualizado com sucesso!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Não foi possível atualizar o status: {e}")
+
+    try:
+        res_orcamentos = supabase.table("orcamentos").select("*").execute()
+        if res_orcamentos.data:
+            df_orcamentos = pd.DataFrame(res_orcamentos.data)
+            st.dataframe(
+                df_orcamentos[["id", "nome_servico", "status_orcamento", "valor_orcamento", "custo_total", "lucro_estimado", "data_criacao"]],
+                use_container_width=True
+            )
+        else:
+            st.info("Nenhum orçamento salvo ainda.")
+    except Exception as e:
+        st.info("Ainda não há orçamentos salvos ou a tabela não está disponível no momento.")
+
+# ==========================================
+# ABA 5: CONFIGURAÇÕES & SISTEMA
 # ==========================================
 with aba_config:
     st.subheader("⚙️ Painel de Controle e Manutenção do Sistema")
