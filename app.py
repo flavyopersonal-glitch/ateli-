@@ -24,7 +24,7 @@ try:
 except Exception:
     conexao_ok = False
 
-st.set_page_config(page_title="PCP Ateliê Pro", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="PCP Ateliê Pro", layout="centered", initial_sidebar_state="collapsed")
 
 # Estilo visual para uma aparência mais profissional e responsiva
 st.markdown(
@@ -35,10 +35,10 @@ st.markdown(
             color: #0f172a;
         }
         .block-container {
-            padding-top: 1rem;
-            padding-left: 0.7rem;
-            padding-right: 0.7rem;
-            max-width: 1400px;
+            padding-top: 0.6rem;
+            padding-left: 0.45rem;
+            padding-right: 0.45rem;
+            max-width: 1200px;
         }
         .title-block {
             font-size: 2.8rem;
@@ -74,12 +74,13 @@ st.markdown(
         }
         .stButton>button {
             border-radius: 14px;
-            padding: 0.8rem 1.6rem;
+            padding: 0.72rem 1.2rem;
             background-color: #0f172a;
             color: white;
             border: none;
             font-weight: 600;
-            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.14);
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+            min-height: 2.6rem;
         }
         .stButton>button:hover {
             background-color: #111827;
@@ -87,7 +88,8 @@ st.markdown(
         .stMetric {
             background: #f8fafc;
             border-radius: 18px;
-            padding: 1rem 1.2rem;
+            padding: 0.85rem 1rem;
+            margin-bottom: 0.4rem;
         }
         .css-1lsmgbg.e16nr0p32 {
             box-shadow: none;
@@ -167,8 +169,10 @@ st.markdown(
         .quick-nav {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.55rem;
-            margin: 0 0 1rem 0;
+            gap: 0.45rem;
+            margin: 0 0 0.8rem 0;
+            overflow-x: auto;
+            padding-bottom: 0.2rem;
         }
         .quick-nav a {
             text-decoration: none;
@@ -176,10 +180,11 @@ st.markdown(
             background: #ffffff;
             border: 1px solid #e2e8f0;
             border-radius: 999px;
-            padding: 0.55rem 0.85rem;
-            font-size: 0.9rem;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.86rem;
             font-weight: 600;
             box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+            white-space: nowrap;
         }
         .quick-nav a:hover {
             background: #f8fafc;
@@ -187,25 +192,28 @@ st.markdown(
 
         @media (max-width: 768px) {
             .block-container {
-                padding-left: 0.4rem !important;
-                padding-right: 0.4rem !important;
+                padding-left: 0.25rem !important;
+                padding-right: 0.25rem !important;
             }
             .app-header {
-                padding: 1rem 0.8rem;
-                margin-bottom: 1rem;
+                padding: 0.8rem 0.7rem;
+                margin-bottom: 0.8rem;
+            }
+            .app-header img {
+                max-width: 64px !important;
             }
             .header-title {
-                font-size: 1.7rem;
+                font-size: 1.35rem;
                 line-height: 1.15;
             }
             .header-subtitle {
-                font-size: 0.8rem;
-                letter-spacing: 0.1em;
+                font-size: 0.72rem;
+                letter-spacing: 0.08em;
             }
             .section-card {
-                padding: 1rem;
-                border-radius: 16px;
-                margin-bottom: 1rem;
+                padding: 0.9rem;
+                border-radius: 14px;
+                margin-bottom: 0.8rem;
             }
             .quick-nav {
                 gap: 0.4rem;
@@ -215,42 +223,49 @@ st.markdown(
                 padding: 0.5rem 0.7rem;
             }
             .section-card h2 {
-                font-size: 1.2rem;
+                font-size: 1.08rem;
             }
             .section-subtitle {
-                font-size: 0.9rem;
+                font-size: 0.86rem;
             }
             .stButton>button {
                 width: 100%;
-                padding: 0.9rem 1rem;
+                padding: 0.8rem 0.95rem;
             }
             div[data-testid="stHorizontalBlock"] > div {
                 width: 100% !important;
                 max-width: 100% !important;
                 min-width: 100% !important;
-                margin-bottom: 0.45rem;
+                margin-bottom: 0.35rem;
             }
             .stMetric {
-                padding: 0.9rem 1rem;
+                padding: 0.8rem 0.9rem;
+            }
+            [data-testid="stDataFrame"] {
+                font-size: 0.85rem;
             }
         }
 
         @media (max-width: 480px) {
             .header-title {
-                font-size: 1.35rem;
+                font-size: 1.15rem;
             }
             .header-subtitle {
-                font-size: 0.72rem;
+                font-size: 0.65rem;
             }
             .section-card {
-                padding: 0.9rem;
+                padding: 0.85rem;
             }
             div[data-testid="stRadio"] > div {
-                gap: 0.35rem;
+                gap: 0.3rem;
             }
             div[data-testid="stRadio"] label {
-                font-size: 0.82rem;
-                padding: 0.45rem 0.65rem;
+                font-size: 0.8rem;
+                padding: 0.4rem 0.6rem;
+            }
+            .quick-nav a {
+                font-size: 0.78rem;
+                padding: 0.4rem 0.6rem;
             }
         }
     </style>
