@@ -31,43 +31,44 @@ st.markdown(
     """
     <style>
         .stApp {
-            background: #f4f7fb;
-            color: #0f172a;
+            background: #070b16;
+            color: #f8fafc;
         }
         .block-container {
             padding-top: 0.6rem;
             padding-left: 0.45rem;
             padding-right: 0.45rem;
             max-width: 1200px;
+            color: #f8fafc;
         }
         .title-block {
             font-size: 2.8rem;
             font-weight: 700;
-            color: #111827;
+            color: #f8fafc;
             margin: 0;
         }
         .subtitle {
-            color: #475569;
+            color: #cbd5e1;
             font-size: 1rem;
             margin-top: 0.25rem;
             margin-bottom: 0.75rem;
         }
         .section-card {
-            background: #ffffff;
+            background: #0f172a;
             border-radius: 24px;
             padding: 1.75rem;
-            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
             margin-bottom: 1.75rem;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #1f2937;
             scroll-margin-top: 92px;
         }
         .section-card h2 {
-            color: #0f172a;
+            color: #f8fafc;
             font-size: 1.45rem;
             margin-bottom: 0.35rem;
         }
         .section-subtitle {
-            color: #64748b;
+            color: #94a3b8;
             margin-top: -0.1rem;
             margin-bottom: 1.15rem;
             font-size: 0.95rem;
@@ -75,21 +76,22 @@ st.markdown(
         .stButton>button {
             border-radius: 14px;
             padding: 0.72rem 1.2rem;
-            background-color: #0f172a;
+            background-color: #2563eb;
             color: white;
             border: none;
             font-weight: 600;
-            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
             min-height: 2.6rem;
         }
         .stButton>button:hover {
-            background-color: #111827;
+            background-color: #1d4ed8;
         }
         .stMetric {
-            background: #f8fafc;
+            background: #111827;
             border-radius: 18px;
             padding: 0.85rem 1rem;
             margin-bottom: 0.4rem;
+            border: 1px solid #1f2937;
         }
         .css-1lsmgbg.e16nr0p32 {
             box-shadow: none;
@@ -98,25 +100,33 @@ st.markdown(
         .stTextArea>div>div>textarea,
         .stNumberInput>div>div>input {
             border-radius: 12px;
-            border: 1px solid #d1d5db;
-            background: #f8fafc;
+            border: 1px solid #334155;
+            background: #07101f;
             padding: 0.85rem 1rem;
             font-size: 1rem;
             min-height: 2.7rem;
+            color: #f8fafc;
+        }
+        .stTextInput>div>div>input::placeholder,
+        .stTextArea>div>div>textarea::placeholder {
+            color: #94a3b8;
         }
         .stSelectbox>div>div>div>div {
             border-radius: 12px;
-            background: #f8fafc;
-            border: 1px solid #d1d5db;
+            background: #07101f;
+            border: 1px solid #334155;
             min-height: 2.7rem;
+            color: #f8fafc;
         }
         label, .stTextInput label, .stTextArea label, .stNumberInput label, .stSelectbox label {
             font-size: 0.96rem;
             font-weight: 600;
-            color: #334155;
+            color: #e2e8f0;
         }
         .st-expander > div {
             border-radius: 18px;
+            background: #111827;
+            border: 1px solid #1f2937;
         }
         .app-header {
             position: sticky;
@@ -126,7 +136,7 @@ st.markdown(
             padding: 1.1rem 1.2rem;
             margin-bottom: 1rem;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 16px 30px rgba(15, 23, 42, 0.16);
+            box-shadow: 0 16px 30px rgba(0, 0, 0, 0.35);
         }
         .header-block {
             text-align: left;
