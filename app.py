@@ -115,24 +115,6 @@ st.markdown(
             font-weight: 600;
             color: #334155;
         }
-        div[data-testid="stRadio"] > div {
-            gap: 0.45rem;
-            flex-wrap: wrap;
-        }
-        div[data-testid="stRadio"] label {
-            border: 1px solid #e2e8f0;
-            border-radius: 999px;
-            padding: 0.5rem 0.8rem;
-            background: #ffffff;
-            color: #334155;
-            font-weight: 600;
-            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
-        }
-        div[data-testid="stRadio"] input:checked + div {
-            background: #0f172a !important;
-            color: white !important;
-            border-color: #0f172a !important;
-        }
         .st-expander > div {
             border-radius: 18px;
         }
@@ -141,10 +123,10 @@ st.markdown(
             top: 0;
             z-index: 99;
             background: linear-gradient(90deg, #0f172a 0%, #111827 100%);
-            padding: 1.6rem 2rem;
-            margin-bottom: 1.5rem;
+            padding: 1.1rem 1.2rem;
+            margin-bottom: 1rem;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
+            box-shadow: 0 16px 30px rgba(15, 23, 42, 0.16);
         }
         .header-block {
             text-align: left;
@@ -166,29 +148,6 @@ st.markdown(
             text-shadow: 0 1px 6px rgba(0, 0, 0, 0.22);
             opacity: 1;
         }
-        .quick-nav {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.45rem;
-            margin: 0 0 0.8rem 0;
-            overflow-x: auto;
-            padding-bottom: 0.2rem;
-        }
-        .quick-nav a {
-            text-decoration: none;
-            color: #0f172a;
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 999px;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.86rem;
-            font-weight: 600;
-            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
-            white-space: nowrap;
-        }
-        .quick-nav a:hover {
-            background: #f8fafc;
-        }
 
         @media (max-width: 768px) {
             .block-container {
@@ -196,31 +155,24 @@ st.markdown(
                 padding-right: 0.25rem !important;
             }
             .app-header {
-                padding: 0.8rem 0.7rem;
-                margin-bottom: 0.8rem;
+                padding: 0.65rem 0.6rem;
+                margin-bottom: 0.6rem;
             }
             .app-header img {
-                max-width: 64px !important;
+                max-width: 52px !important;
             }
             .header-title {
-                font-size: 1.35rem;
-                line-height: 1.15;
+                font-size: 1.1rem;
+                line-height: 1.1;
             }
             .header-subtitle {
-                font-size: 0.72rem;
-                letter-spacing: 0.08em;
+                font-size: 0.64rem;
+                letter-spacing: 0.06em;
             }
             .section-card {
                 padding: 0.9rem;
                 border-radius: 14px;
                 margin-bottom: 0.8rem;
-            }
-            .quick-nav {
-                gap: 0.4rem;
-            }
-            .quick-nav a {
-                font-size: 0.82rem;
-                padding: 0.5rem 0.7rem;
             }
             .section-card h2 {
                 font-size: 1.08rem;
@@ -256,16 +208,8 @@ st.markdown(
             .section-card {
                 padding: 0.85rem;
             }
-            div[data-testid="stRadio"] > div {
-                gap: 0.3rem;
-            }
-            div[data-testid="stRadio"] label {
-                font-size: 0.8rem;
-                padding: 0.4rem 0.6rem;
-            }
-            .quick-nav a {
-                font-size: 0.78rem;
-                padding: 0.4rem 0.6rem;
+            div[data-testid="stSelectbox"] {
+                width: 100% !important;
             }
         }
     </style>
@@ -285,18 +229,6 @@ with st.container():
         st.markdown('<div class="header-block"><h1 class="title-block header-title">ATELIÊ CRISTO REI</h1><p class="header-subtitle">ADVÉNIAT REGNUM TUUM</p></div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown(
-    """
-    <div class="quick-nav">
-        <a href="#cadastrar-pedido">Produção</a>
-        <a href="#gerenciamento-de-materiais">Estoque</a>
-        <a href="#financas-e-previsoes">Finanças</a>
-        <a href="#orcamentos-profissionais">Orçamentos</a>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
 # Painel resumo executivo
 if conexao_ok:
     try:
@@ -310,11 +242,11 @@ else:
     total_pedidos = 0
     pedidos_urgentes = 0
 
-metric_col1, metric_col2, metric_col3 = st.columns([1, 1, 2])
+metric_col1, metric_col2 = st.columns([1, 1])
 metric_col1.metric("Pedidos ativos", total_pedidos)
 metric_col2.metric("Pedidos urgentes", pedidos_urgentes)
-metric_col3.markdown("**Painel de controle com visão clara para tomada de decisão e entrega de prazos.**")
 
+st.caption("Painel rápido para visualizar demanda e urgência sem perder espaço.")
 st.markdown("---")
 
 if not conexao_ok:
@@ -338,10 +270,9 @@ def end_section():
     st.markdown("</div>", unsafe_allow_html=True)
 
 # 2. NAVEGAÇÃO RÁPIDA DO SISTEMA
-selected_section = st.radio(
-    "Navegar entre áreas",
+selected_section = st.selectbox(
+    "Selecione a área",
     ["Produção", "Estoque", "Finanças", "Orçamentos", "Configurações"],
-    horizontal=True,
     key="section_nav"
 )
 
