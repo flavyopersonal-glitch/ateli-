@@ -113,26 +113,23 @@ st.markdown(
             font-weight: 600;
             color: #334155;
         }
-        div[data-testid="stTabs"] button {
-            border-radius: 999px;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.9rem;
-            min-height: 2.2rem;
-            white-space: nowrap;
+        div[data-testid="stRadio"] > div {
+            gap: 0.45rem;
+            flex-wrap: wrap;
         }
-        div[data-testid="stTabs"] [data-testid="stBaseButton-secondary"] {
-            background: transparent;
-            color: #475569;
+        div[data-testid="stRadio"] label {
             border: 1px solid #e2e8f0;
+            border-radius: 999px;
+            padding: 0.5rem 0.8rem;
+            background: #ffffff;
+            color: #334155;
+            font-weight: 600;
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
         }
-        div[data-testid="stTabs"] [data-testid="stBaseButton-secondary"]:hover {
-            background: #f8fafc;
-            color: #0f172a;
-        }
-        div[data-testid="stTabs"] [data-testid="stBaseButton-secondary"][aria-selected="true"] {
-            background: #0f172a;
-            color: white;
-            border-color: #0f172a;
+        div[data-testid="stRadio"] input:checked + div {
+            background: #0f172a !important;
+            color: white !important;
+            border-color: #0f172a !important;
         }
         .st-expander > div {
             border-radius: 18px;
@@ -248,11 +245,10 @@ st.markdown(
             .section-card {
                 padding: 0.9rem;
             }
-            div[data-testid="stTabs"] {
-                overflow-x: auto;
-                padding-bottom: 0.2rem;
+            div[data-testid="stRadio"] > div {
+                gap: 0.35rem;
             }
-            div[data-testid="stTabs"] button {
+            div[data-testid="stRadio"] label {
                 font-size: 0.82rem;
                 padding: 0.45rem 0.65rem;
             }
@@ -326,19 +322,18 @@ def begin_section(title, subtitle="", anchor=None):
 def end_section():
     st.markdown("</div>", unsafe_allow_html=True)
 
-# 2. ABAS DO SISTEMA
-aba_producao, aba_estoque, aba_financeiro, aba_orcamento, aba_config = st.tabs([
-    "Produção", 
-    "Estoque", 
-    "Finanças",
-    "Orçamentos",
-    "Configurações"
-])
+# 2. NAVEGAÇÃO RÁPIDA DO SISTEMA
+selected_section = st.radio(
+    "Navegar entre áreas",
+    ["Produção", "Estoque", "Finanças", "Orçamentos", "Configurações"],
+    horizontal=True,
+    key="section_nav"
+)
 
 # ==========================================
 # ABA 1: LINHA DE PRODUÇÃO & PRAZOS
 # ==========================================
-with aba_producao:
+if selected_section == "Produção":
     begin_section("Cadastrar Pedido", "Registre pedidos com prioridade e dados completos para a produção.", anchor="cadastrar-pedido")
     col1, col2 = st.columns([1, 2])
     
@@ -478,7 +473,7 @@ with aba_producao:
     end_section()
 # ABA 2: CONTROLE DE ESTOQUE
 # ==========================================
-with aba_estoque:
+elif selected_section == "Estoque":
     begin_section("Gerenciamento de Materiais", "Controle o estoque com alertas de reposição e custos detalhados.", anchor="gerenciamento-de-materiais")
     ec1, ec2 = st.columns([1, 2])
     
@@ -510,7 +505,7 @@ with aba_estoque:
 # ==========================================
 # ABA 3: CONTROLE DE CAIXA & IA PREVISÃO
 # ==========================================
-with aba_financeiro:
+elif selected_section == "Finanças":
     begin_section("Finanças e Previsões", "Monitore receita, margem e a tendência de faturamento com inteligência.", anchor="financas-e-previsoes")
     
     res_fin = supabase.table("vendas_e_financas").select("*").execute()
@@ -584,7 +579,7 @@ with aba_financeiro:
     end_section()
 # ABA 4: ORÇAMENTO
 # ==========================================
-with aba_orcamento:
+elif selected_section == "Orçamentos":
     begin_section("Orçamentos Profissionais", "Gere propostas elegantes em PDF e envie automaticamente pelo WhatsApp.", anchor="orcamentos-profissionais")
 
     with st.form("form_orcamento", clear_on_submit=True):
@@ -707,7 +702,7 @@ with aba_orcamento:
 # ==========================================
 # ABA 5: CONFIGURAÇÕES & SISTEMA
 # ==========================================
-with aba_config:
+elif selected_section == "Configurações":
     begin_section("Configurações do Sistema", "Ajuste o app, faça backups e mantenha o ateliê sempre organizado.", anchor="configuracoes-do-sistema")
     
     # SEÇÃO 1: BACKUP TOTAL DE DADOS
