@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote
 import streamlit as st
@@ -23,15 +24,21 @@ try:
 except Exception:
     conexao_ok = False
 
-st.set_page_config(page_title="PCP Ateliê Pro", layout="wide")
+st.set_page_config(page_title="PCP Ateliê Pro", layout="wide", initial_sidebar_state="collapsed")
 
-# Estilo visual para uma aparência mais profissional
+# Estilo visual para uma aparência mais profissional e responsiva
 st.markdown(
     """
     <style>
         .stApp {
             background: #f4f7fb;
             color: #0f172a;
+        }
+        .block-container {
+            padding-top: 1rem;
+            padding-left: 0.7rem;
+            padding-right: 0.7rem;
+            max-width: 1400px;
         }
         .title-block {
             font-size: 2.8rem;
@@ -52,6 +59,7 @@ st.markdown(
             box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
             margin-bottom: 1.75rem;
             border: 1px solid #e2e8f0;
+            scroll-margin-top: 92px;
         }
         .section-card h2 {
             color: #0f172a;
@@ -71,6 +79,7 @@ st.markdown(
             color: white;
             border: none;
             font-weight: 600;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.14);
         }
         .stButton>button:hover {
             background-color: #111827;
@@ -89,12 +98,41 @@ st.markdown(
             border-radius: 12px;
             border: 1px solid #d1d5db;
             background: #f8fafc;
-            padding: 0.8rem 1rem;
+            padding: 0.85rem 1rem;
+            font-size: 1rem;
+            min-height: 2.7rem;
         }
         .stSelectbox>div>div>div>div {
             border-radius: 12px;
             background: #f8fafc;
             border: 1px solid #d1d5db;
+            min-height: 2.7rem;
+        }
+        label, .stTextInput label, .stTextArea label, .stNumberInput label, .stSelectbox label {
+            font-size: 0.96rem;
+            font-weight: 600;
+            color: #334155;
+        }
+        div[data-testid="stTabs"] button {
+            border-radius: 999px;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.9rem;
+            min-height: 2.2rem;
+            white-space: nowrap;
+        }
+        div[data-testid="stTabs"] [data-testid="stBaseButton-secondary"] {
+            background: transparent;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+        }
+        div[data-testid="stTabs"] [data-testid="stBaseButton-secondary"]:hover {
+            background: #f8fafc;
+            color: #0f172a;
+        }
+        div[data-testid="stTabs"] [data-testid="stBaseButton-secondary"][aria-selected="true"] {
+            background: #0f172a;
+            color: white;
+            border-color: #0f172a;
         }
         .st-expander > div {
             border-radius: 18px;
@@ -129,6 +167,96 @@ st.markdown(
             text-shadow: 0 1px 6px rgba(0, 0, 0, 0.22);
             opacity: 1;
         }
+        .quick-nav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            margin: 0 0 1rem 0;
+        }
+        .quick-nav a {
+            text-decoration: none;
+            color: #0f172a;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 999px;
+            padding: 0.55rem 0.85rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+        }
+        .quick-nav a:hover {
+            background: #f8fafc;
+        }
+
+        @media (max-width: 768px) {
+            .block-container {
+                padding-left: 0.4rem !important;
+                padding-right: 0.4rem !important;
+            }
+            .app-header {
+                padding: 1rem 0.8rem;
+                margin-bottom: 1rem;
+            }
+            .header-title {
+                font-size: 1.7rem;
+                line-height: 1.15;
+            }
+            .header-subtitle {
+                font-size: 0.8rem;
+                letter-spacing: 0.1em;
+            }
+            .section-card {
+                padding: 1rem;
+                border-radius: 16px;
+                margin-bottom: 1rem;
+            }
+            .quick-nav {
+                gap: 0.4rem;
+            }
+            .quick-nav a {
+                font-size: 0.82rem;
+                padding: 0.5rem 0.7rem;
+            }
+            .section-card h2 {
+                font-size: 1.2rem;
+            }
+            .section-subtitle {
+                font-size: 0.9rem;
+            }
+            .stButton>button {
+                width: 100%;
+                padding: 0.9rem 1rem;
+            }
+            div[data-testid="stHorizontalBlock"] > div {
+                width: 100% !important;
+                max-width: 100% !important;
+                min-width: 100% !important;
+                margin-bottom: 0.45rem;
+            }
+            .stMetric {
+                padding: 0.9rem 1rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header-title {
+                font-size: 1.35rem;
+            }
+            .header-subtitle {
+                font-size: 0.72rem;
+            }
+            .section-card {
+                padding: 0.9rem;
+            }
+            div[data-testid="stTabs"] {
+                overflow-x: auto;
+                padding-bottom: 0.2rem;
+            }
+            div[data-testid="stTabs"] button {
+                font-size: 0.82rem;
+                padding: 0.45rem 0.65rem;
+            }
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -145,6 +273,18 @@ with st.container():
     with header_cols[1]:
         st.markdown('<div class="header-block"><h1 class="title-block header-title">ATELIÊ CRISTO REI</h1><p class="header-subtitle">ADVÉNIAT REGNUM TUUM</p></div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown(
+    """
+    <div class="quick-nav">
+        <a href="#cadastrar-pedido">Produção</a>
+        <a href="#gerenciamento-de-materiais">Estoque</a>
+        <a href="#financas-e-previsoes">Finanças</a>
+        <a href="#orcamentos-profissionais">Orçamentos</a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Painel resumo executivo
 if conexao_ok:
@@ -179,8 +319,9 @@ def calcular_proximo_dia_util(data_atual):
         amanha += timedelta(days=1)
     return amanha
 
-def begin_section(title, subtitle=""):
-    st.markdown(f"<div class='section-card'><h2>{title}</h2><p class='section-subtitle'>{subtitle}</p>", unsafe_allow_html=True)
+def begin_section(title, subtitle="", anchor=None):
+    section_id = anchor or re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+    st.markdown(f"<div class='section-card' id='{section_id}'><h2>{title}</h2><p class='section-subtitle'>{subtitle}</p>", unsafe_allow_html=True)
 
 def end_section():
     st.markdown("</div>", unsafe_allow_html=True)
@@ -198,7 +339,7 @@ aba_producao, aba_estoque, aba_financeiro, aba_orcamento, aba_config = st.tabs([
 # ABA 1: LINHA DE PRODUÇÃO & PRAZOS
 # ==========================================
 with aba_producao:
-    begin_section("Cadastrar Pedido", "Registre pedidos com prioridade e dados completos para a produção.")
+    begin_section("Cadastrar Pedido", "Registre pedidos com prioridade e dados completos para a produção.", anchor="cadastrar-pedido")
     col1, col2 = st.columns([1, 2])
     
     with col1:
@@ -338,7 +479,7 @@ with aba_producao:
 # ABA 2: CONTROLE DE ESTOQUE
 # ==========================================
 with aba_estoque:
-    begin_section("Gerenciamento de Materiais", "Controle o estoque com alertas de reposição e custos detalhados.")
+    begin_section("Gerenciamento de Materiais", "Controle o estoque com alertas de reposição e custos detalhados.", anchor="gerenciamento-de-materiais")
     ec1, ec2 = st.columns([1, 2])
     
     with ec1:
@@ -370,7 +511,7 @@ with aba_estoque:
 # ABA 3: CONTROLE DE CAIXA & IA PREVISÃO
 # ==========================================
 with aba_financeiro:
-    begin_section("Finanças e Previsões", "Monitore receita, margem e a tendência de faturamento com inteligência.")
+    begin_section("Finanças e Previsões", "Monitore receita, margem e a tendência de faturamento com inteligência.", anchor="financas-e-previsoes")
     
     res_fin = supabase.table("vendas_e_financas").select("*").execute()
     if res_fin.data:
@@ -444,7 +585,7 @@ with aba_financeiro:
 # ABA 4: ORÇAMENTO
 # ==========================================
 with aba_orcamento:
-    begin_section("Orçamentos Profissionais", "Gere propostas elegantes em PDF e envie automaticamente pelo WhatsApp.")
+    begin_section("Orçamentos Profissionais", "Gere propostas elegantes em PDF e envie automaticamente pelo WhatsApp.", anchor="orcamentos-profissionais")
 
     with st.form("form_orcamento", clear_on_submit=True):
         nome_servico = st.text_input("Nome do Serviço")
@@ -567,7 +708,7 @@ with aba_orcamento:
 # ABA 5: CONFIGURAÇÕES & SISTEMA
 # ==========================================
 with aba_config:
-    begin_section("Configurações do Sistema", "Ajuste o app, faça backups e mantenha o ateliê sempre organizado.")
+    begin_section("Configurações do Sistema", "Ajuste o app, faça backups e mantenha o ateliê sempre organizado.", anchor="configuracoes-do-sistema")
     
     # SEÇÃO 1: BACKUP TOTAL DE DADOS
     st.markdown("### 💾 Backup de Segurança")
