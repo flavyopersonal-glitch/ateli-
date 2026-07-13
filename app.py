@@ -1,732 +1,335 @@
-﻿import os
-import re
-from pathlib import Path
-from typing import Optional
+"""Ateliê Cristo Rei — gestão de pedidos, orçamentos e finanças.
 
-import numpy as np
+Aplicação independente, com banco SQLite criado automaticamente em data/atelie.db.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import date, datetime
+from io import BytesIO
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
 import streamlit as st
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
-from sklearn.linear_model import LinearRegression
-from supabase import Client, create_client
-
-from orcamento_utils import gerar_link_whatsapp, gerar_pdf_orcamento
-
-PROJECT_TITLE = "Ateliê Cristo Rei"
-PAGE_ICON = "🎨"
-CAPACIDADE_DIARIA_HORAS = 8.0
-SECTION_OPTIONS = ["Produção", "Estoque", "Finanças", "Orçamentos", "Configurações"]
-
-st.set_page_config(page_title=PROJECT_TITLE, page_icon=PAGE_ICON, layout="wide", initial_sidebar_state="collapsed")
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
-def format_currency(valor: float) -> str:
-    return f"R$ {valor:,.2f}"
+APP_NAME = "Ateliê Cristo Rei"
+DB_PATH = Path("data") / "atelie.db"
+ORDER_STATUS = ["Novo pedido", "Em produção", "Aguardando aprovação", "Pronto para entrega", "Entregue", "Cancelado"]
+
+st.set_page_config(page_title=APP_NAME, page_icon="✦", layout="wide", initial_sidebar_state="expanded")
 
 
-def load_environment() -> tuple[Optional[str], Optional[str]]:
-    load_dotenv()
-    return os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY")
+def brl(value: float | int | None) -> str:
+    value = float(value or 0)
+    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def get_supabase_client(url: Optional[str], key: Optional[str]) -> Optional[Client]:
-    if not url or not key:
-        return None
-
+def iso_to_br(value: str | None) -> str:
+    if not value:
+        return "—"
     try:
-        return create_client(url, key)
-    except Exception:
-        return None
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        return value
 
 
-def has_supabase_connection(client: Optional[Client]) -> bool:
-    return client is not None
+@st.cache_resource
+def database() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente TEXT NOT NULL,
+            telefone TEXT,
+            titulo TEXT NOT NULL,
+            descricao TEXT,
+            tecnica TEXT,
+            prazo TEXT,
+            status TEXT NOT NULL DEFAULT 'Novo pedido',
+            valor_combinado REAL NOT NULL DEFAULT 0,
+            custo_estimado REAL NOT NULL DEFAULT 0,
+            observacoes TEXT,
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS orcamentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            numero TEXT NOT NULL UNIQUE,
+            cliente TEXT NOT NULL,
+            telefone TEXT,
+            titulo TEXT NOT NULL,
+            descricao TEXT,
+            validade TEXT,
+            valor REAL NOT NULL DEFAULT 0,
+            prazo_producao TEXT,
+            condicoes TEXT,
+            status TEXT NOT NULL DEFAULT 'Enviado',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS transacoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL CHECK(tipo IN ('Entrada', 'Saída')),
+            descricao TEXT NOT NULL,
+            valor REAL NOT NULL,
+            data TEXT NOT NULL,
+            pedido_id INTEGER,
+            categoria TEXT,
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS configuracoes (
+            chave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+    return conn
 
 
-def fetch_table(client: Optional[Client], table_name: str, columns: str = "*") -> list[dict]:
-    if client is None:
-        return []
-
-    try:
-        result = client.table(table_name).select(columns).execute()
-        return result.data or []
-    except Exception:
-        return []
+def execute(sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+    cur = database().execute(sql, params)
+    database().commit()
+    return cur
 
 
-def safe_db_insert(client: Client, table_name: str, data: dict, optional_fields: Optional[set[str]] = None):
-    if optional_fields is None:
-        optional_fields = set()
-
-    try:
-        return client.table(table_name).insert(data).execute()
-    except Exception:
-        trimmed_data = {k: v for k, v in data.items() if k not in optional_fields}
-        return client.table(table_name).insert(trimmed_data).execute()
+def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    return [dict(row) for row in database().execute(sql, params).fetchall()]
 
 
-def calcular_proximo_dia_util(data_atual: datetime.date) -> datetime.date:
-    proximo = data_atual + timedelta(days=1)
-    while proximo.weekday() >= 5:
-        proximo += timedelta(days=1)
-    return proximo
+def scalar(sql: str, params: tuple[Any, ...] = ()) -> Any:
+    result = database().execute(sql, params).fetchone()
+    return result[0] if result else 0
 
 
-def render_global_style() -> None:
+def inject_style() -> None:
     st.markdown(
         """
         <style>
-            .stApp {
-                background: #070b16;
-                color: #f8fafc;
-            }
-            .block-container {
-                padding-top: 0.9rem;
-                padding-left: 0.9rem;
-                padding-right: 0.9rem;
-                max-width: 1180px;
-                color: #f8fafc;
-            }
-            .section-card {
-                background: #0f172a;
-                border-radius: 22px;
-                padding: 1.6rem;
-                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
-                margin-bottom: 1.4rem;
-                border: 1px solid #1f2937;
-                scroll-margin-top: 92px;
-            }
-            .section-title {
-                color: #f8fafc;
-                font-size: 1.35rem;
-                margin-bottom: 0.5rem;
-            }
-            .section-subtitle {
-                color: #94a3b8;
-                margin-top: 0;
-                margin-bottom: 1.1rem;
-                font-size: 0.95rem;
-            }
-            .stButton>button {
-                border-radius: 14px;
-                padding: 0.72rem 1.2rem;
-                background-color: #2563eb;
-                color: white;
-                border: none;
-                font-weight: 600;
-                box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
-                min-height: 2.6rem;
-            }
-            .stButton>button:hover {
-                background-color: #1d4ed8;
-            }
-            .stMetric {
-                background: #111827;
-                border-radius: 18px;
-                padding: 0.9rem 1rem;
-                margin-bottom: 0.4rem;
-                border: 1px solid #1f2937;
-            }
-            .stTextInput>div>div>input,
-            .stTextArea>div>div>textarea,
-            .stNumberInput>div>div>input {
-                border-radius: 12px;
-                border: 1px solid #334155;
-                background: #07101f;
-                padding: 0.85rem 1rem;
-                font-size: 1rem;
-                min-height: 2.7rem;
-                color: #f8fafc;
-            }
-            .stTextInput>div>div>input::placeholder,
-            .stTextArea>div>div>textarea::placeholder {
-                color: #94a3b8;
-            }
-            .stSelectbox>div>div>div>div {
-                border-radius: 12px;
-                background: #07101f;
-                border: 1px solid #334155;
-                min-height: 2.7rem;
-                color: #f8fafc;
-            }
-            label,
-            .stTextInput label,
-            .stTextArea label,
-            .stNumberInput label,
-            .stSelectbox label {
-                font-size: 0.96rem;
-                font-weight: 600;
-                color: #e2e8f0;
-            }
-            .st-expander > div {
-                border-radius: 18px;
-                background: #111827;
-                border: 1px solid #1f2937;
-            }
-            .app-header {
-                position: sticky;
-                top: 0;
-                z-index: 99;
-                background: linear-gradient(90deg, #0f172a 0%, #111827 100%);
-                padding: 1rem 1.2rem;
-                margin-bottom: 1rem;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-                box-shadow: 0 22px 40px rgba(0, 0, 0, 0.28);
-            }
-            .header-block {
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            }
-            .header-title {
-                margin-bottom: 0.25rem;
-                color: #ffffff;
-                font-size: 2.1rem;
-                font-weight: 800;
-                letter-spacing: 0.04em;
-            }
-            .header-subtitle {
-                margin-top: 0;
-                color: rgba(255, 255, 255, 0.78);
-                font-size: 0.92rem;
-                font-weight: 500;
-                letter-spacing: 0.14em;
-                text-transform: uppercase;
-            }
-            .summary-caption {
-                color: #cbd5e1;
-                margin-top: 0.4rem;
-                font-size: 0.95rem;
-            }
-            @media (max-width: 768px) {
-                .block-container {
-                    padding-left: 0.55rem !important;
-                    padding-right: 0.55rem !important;
-                }
-                .app-header {
-                    padding: 0.8rem 0.8rem;
-                    margin-bottom: 0.7rem;
-                }
-                .header-title {
-                    font-size: 1.35rem;
-                }
-                .header-subtitle {
-                    font-size: 0.72rem;
-                }
-                .section-card {
-                    padding: 1rem;
-                    border-radius: 16px;
-                    margin-bottom: 1rem;
-                }
-                .section-title {
-                    font-size: 1.12rem;
-                }
-                .stButton>button {
-                    width: 100%;
-                    padding: 0.75rem 0.95rem;
-                }
-            }
-            @media (max-width: 480px) {
-                .app-header {
-                    padding: 0.65rem 0.6rem;
-                    margin-bottom: 0.55rem;
-                }
-                .header-title {
-                    font-size: 1.1rem;
-                }
-                .header-subtitle {
-                    font-size: 0.62rem;
-                }
-                .section-card {
-                    padding: 0.85rem;
-                }
-            }
+          .stApp { background: #f7f3ed; color: #2d2521; }
+          [data-testid="stSidebar"] { background: #34251f; }
+          [data-testid="stSidebar"] * { color: #fbf6ee !important; }
+          .block-container { max-width: 1240px; padding-top: 2.2rem; padding-bottom: 3rem; }
+          h1, h2, h3 { font-family: Georgia, serif; color: #34251f; }
+          .eyebrow { color: #a44e2c; text-transform: uppercase; font-weight: 700; letter-spacing: .14em; font-size: .76rem; margin-bottom: .2rem; }
+          .hero { background: #34251f; color: #fff8ec; border-radius: 20px; padding: 2rem; margin: .8rem 0 1.6rem; }
+          .hero h2 { color: #fff8ec; margin: 0 0 .4rem; }
+          .hero p { color: #e6d6c3; margin: 0; }
+          div[data-testid="stMetric"] { background: #fffdf9; border: 1px solid #eaded1; border-radius: 14px; padding: .8rem; }
+          .stButton > button, .stDownloadButton > button { background: #a44e2c; color: white; border: none; border-radius: 9px; font-weight: 600; }
+          .stButton > button:hover, .stDownloadButton > button:hover { background: #7e3920; color: white; }
+          .card { background: #fffdf9; border: 1px solid #eaded1; padding: 1.25rem; border-radius: 14px; }
+          .muted { color: #766863; }
+          .stDataFrame { border: 1px solid #eaded1; border-radius: 12px; overflow: hidden; }
+          @media (max-width: 700px) { .block-container { padding: 1.1rem .8rem; } .hero { padding: 1.3rem; } }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-def render_header(logo_path: Path) -> None:
-    with st.container():
-        cols = st.columns([1, 4])
-        with cols[0]:
-            if logo_path.exists():
-                st.image(str(logo_path), width=110)
-        with cols[1]:
-            st.markdown(
-                f"""
-                <div class='header-block'>
-                    <h1 class='header-title'>{PROJECT_TITLE}</h1>
-                    <p class='header-subtitle'>Controle completo para seu ateliê</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+def sidebar() -> str:
+    with st.sidebar:
+        st.markdown("## ✦ Ateliê Cristo Rei")
+        st.caption("Gestão feita para o seu processo criativo")
+        st.divider()
+        page = st.radio("Navegação", ["Visão geral", "Pedidos", "Orçamentos", "Financeiro"], label_visibility="collapsed")
+        st.divider()
+        st.caption("Os dados ficam salvos neste computador.")
+    return page
 
 
-def begin_section(title: str, subtitle: str = "", anchor: Optional[str] = None) -> None:
-    safe_id = anchor or re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-    subtitle_html = f"<p class='section-subtitle'>{subtitle}</p>" if subtitle else ""
-    st.markdown(
-        f"<div class='section-card' id='{safe_id}'><h2 class='section-title'>{title}</h2>{subtitle_html}",
-        unsafe_allow_html=True,
+def order_options() -> dict[str, int | None]:
+    options = {"Sem vínculo": None}
+    for order in rows("SELECT id, cliente, titulo FROM pedidos WHERE status != 'Cancelado' ORDER BY criado_em DESC"):
+        options[f"#{order['id']} · {order['cliente']} — {order['titulo']}"] = order["id"]
+    return options
+
+
+def render_dashboard() -> None:
+    st.markdown('<p class="eyebrow">Visão geral</p><h1>Seu ateliê, sob controle.</h1>', unsafe_allow_html=True)
+    today = date.today().isoformat()
+    active = scalar("SELECT COUNT(*) FROM pedidos WHERE status NOT IN ('Entregue', 'Cancelado')")
+    due = scalar("SELECT COUNT(*) FROM pedidos WHERE prazo IS NOT NULL AND prazo >= ? AND status NOT IN ('Entregue', 'Cancelado')", (today,))
+    income = scalar("SELECT COALESCE(SUM(valor), 0) FROM transacoes WHERE tipo = 'Entrada'")
+    expense = scalar("SELECT COALESCE(SUM(valor), 0) FROM transacoes WHERE tipo = 'Saída'")
+    st.markdown('<div class="hero"><h2>Bom trabalho!</h2><p>Acompanhe o andamento das peças, mantenha o cliente informado e enxergue o resultado do seu trabalho.</p></div>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Pedidos em aberto", active)
+    c2.metric("Prazos programados", due)
+    c3.metric("Entradas", brl(income))
+    c4.metric("Saldo", brl(income - expense))
+
+    st.subheader("Pedidos que precisam de atenção")
+    attention = rows(
+        """SELECT id, cliente, titulo, prazo, status FROM pedidos
+           WHERE status NOT IN ('Entregue', 'Cancelado')
+           ORDER BY CASE WHEN prazo IS NULL THEN 1 ELSE 0 END, prazo ASC LIMIT 8"""
     )
+    if attention:
+        frame = pd.DataFrame(attention).rename(columns={"id": "Nº", "cliente": "Cliente", "titulo": "Peça", "prazo": "Prazo", "status": "Etapa"})
+        frame["Prazo"] = frame["Prazo"].map(iso_to_br)
+        st.dataframe(frame, use_container_width=True, hide_index=True)
+    else:
+        st.info("Ainda não há pedidos. Comece adicionando o primeiro pedido na aba Pedidos.")
 
 
-def end_section() -> None:
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def render_summary_panel(client: Client) -> None:
-    pedidos_resumo = fetch_table(client, "pedidos")
-    total_pedidos = len(pedidos_resumo)
-    pedidos_urgentes = sum(1 for pedido in pedidos_resumo if pedido.get("status_urgente"))
-
-    c1, c2 = st.columns(2)
-    c1.metric("Pedidos ativos", total_pedidos)
-    c2.metric("Pedidos urgentes", pedidos_urgentes)
-
-    st.caption("Painel rápido para visualizar demanda e urgência sem perder espaço.")
-    st.markdown("---")
-
-
-def render_producao(client: Client) -> None:
-    begin_section("Cadastrar Pedido", "Registre pedidos com prioridade e dados completos para a produção.", anchor="cadastrar-pedido")
-    left, right = st.columns([1, 2])
-
+def render_orders() -> None:
+    st.markdown('<p class="eyebrow">Pedidos</p><h1>Da encomenda à entrega.</h1>', unsafe_allow_html=True)
+    left, right = st.columns([1.05, 1], gap="large")
     with left:
-        with st.form("form_novo_pedido", clear_on_submit=True):
-            cliente = st.text_input("Nome do Cliente")
-            descricao_servico = st.text_area(
-                "Descrição do Serviço",
-                placeholder="Descreva o serviço, detalhes, acabamento e observações importantes...",
-                height=120,
-            )
-            horas = st.number_input("Horas de Produção Necessárias", min_value=0.5, step=0.5, value=2.0)
-            data_solicitada = st.date_input("Prazo solicitado pelo cliente", min_value=datetime.today())
-            urgente = st.checkbox("Pedido urgente (prioridade de produção)")
-
-            st.markdown("**Dados de Venda:**")
-            valor_venda = st.number_input("Valor da Venda (R$)", min_value=0.0, step=10.0, value=100.0)
-            custo_material = st.number_input("Custo Estimado de Material (R$)", min_value=0.0, step=5.0, value=30.0)
-            
-            submeter = st.form_submit_button("Agendar e Registrar")
-            if submeter and cliente:
-                pedido_data = {
-                    "cliente": cliente,
-                    "descricao_servico": descricao_servico,
-                    "horas_necessarias": horas,
-                    "data_solicitada_cliente": str(data_solicitada),
-                    "status_urgente": urgente,
-                    "status_producao": "Na Fila",
-                }
-
-                try:
-                    response = safe_db_insert(client, "pedidos", pedido_data, optional_fields={"descricao_servico"})
-                    pedido_id = response.data[0]["id"]
-                    lucro = valor_venda - custo_material
-                    financeiro_data = {
-                        "pedido_id": pedido_id,
-                        "valor_venda": valor_venda,
-                        "custo_total": custo_material,
-                        "lucro_liquido": lucro,
-                        "status_financeiro": "Pendente",
-                        "data_pagamento": str(data_solicitada),
-                    }
-                    client.table("vendas_e_financas").insert(financeiro_data).execute()
-                    st.success(f"Pedido de {cliente} registrado com sucesso!")
-                    st.rerun()
-                except Exception as error:
-                    st.error(f"Erro ao salvar dados: {error}")
-
-    with right:
-        begin_section("📊 Agenda de Fábrica", "Visualize a fila, prazos e alertas de entrega em uma visão clara.")
-        pedidos = fetch_table(client, "pedidos")
-
-        if pedidos:
-            df = pd.DataFrame(pedidos)
-            if "created_at" in df.columns:
-                df = df.sort_values(by=["status_urgente", "created_at"], ascending=[False, True])
+        st.subheader("Novo pedido")
+        with st.form("novo_pedido", clear_on_submit=True):
+            cliente = st.text_input("Nome do cliente *")
+            telefone = st.text_input("WhatsApp")
+            titulo = st.text_input("Peça ou encomenda *", placeholder="Ex.: Imagem de Nossa Senhora Aparecida")
+            descricao = st.text_area("Detalhes da peça", placeholder="Tamanho, cores, acabamento e referências")
+            a, b = st.columns(2)
+            tecnica = a.text_input("Técnica / acabamento", placeholder="Pintura artesanal")
+            prazo = b.date_input("Prazo de entrega", value=None, format="DD/MM/YYYY")
+            c, d = st.columns(2)
+            valor = c.number_input("Valor combinado (R$)", min_value=0.0, step=10.0)
+            custo = d.number_input("Custo estimado (R$)", min_value=0.0, step=10.0)
+            obs = st.text_area("Observações internas")
+            saved = st.form_submit_button("Cadastrar pedido", use_container_width=True)
+        if saved:
+            if not cliente.strip() or not titulo.strip():
+                st.error("Informe o nome do cliente e a peça.")
             else:
-                df = df.sort_values(by=["status_urgente"], ascending=[False])
-            df = df.reset_index(drop=True)
-            df["descricao_servico"] = df.get("descricao_servico", pd.Series([""] * len(df)))
-
-            planejamento = []
-            ponteiro_data = datetime.today().date()
-            while ponteiro_data.weekday() >= 5:
-                ponteiro_data = calcular_proximo_dia_util(ponteiro_data)
-
-            horas_disponiveis = CAPACIDADE_DIARIA_HORAS
-            for _, row in df.iterrows():
-                if row.get("status_producao") == "Finalizado":
-                    planejamento.append({
-                        "Data Prevista": row.get("data_programada_producao", str(ponteiro_data)),
-                        "Tempo de Fábrica": "-",
-                        "Alerta Prazo": "Finalizado",
-                    })
-                    continue
-
-                horas_restantes = float(row.get("horas_necessarias", 0))
-                inicio_pedido = ponteiro_data
-                while horas_restantes > 0:
-                    if horas_restantes <= horas_disponiveis:
-                        horas_disponiveis -= horas_restantes
-                        horas_restantes = 0
-                        if horas_disponiveis == 0:
-                            ponteiro_data = calcular_proximo_dia_util(ponteiro_data)
-                            horas_disponiveis = CAPACIDADE_DIARIA_HORAS
-                    else:
-                        horas_restantes -= horas_disponiveis
-                        ponteiro_data = calcular_proximo_dia_util(ponteiro_data)
-                        horas_disponiveis = CAPACIDADE_DIARIA_HORAS
-
-                data_prevista = ponteiro_data
-                dias_ocupados = (data_prevista - inicio_pedido).days + 1
-                prazo_cliente = datetime.strptime(str(row.get("data_solicitada_cliente", "1970-01-01")), "%Y-%m-%d").date()
-                alerta = "Atraso previsto" if data_prevista > prazo_cliente else "No prazo"
-
-                planejamento.append({
-                    "Data Prevista": str(data_prevista),
-                    "Tempo de Fábrica": f"{dias_ocupados} dia(s)",
-                    "Alerta Prazo": alerta,
-                })
-
-            df_agenda = pd.concat([df.reset_index(drop=True), pd.DataFrame(planejamento)], axis=1)
-            st.dataframe(
-                df_agenda[["id", "cliente", "descricao_servico", "horas_necessarias", "Tempo de Fábrica", "status_urgente", "data_solicitada_cliente", "Data Prevista", "Alerta Prazo", "status_producao"]],
-                column_config={
-                    "horas_necessarias": "Horas Totais",
-                    "status_urgente": "Urgente",
-                    "data_solicitada_cliente": "Prazo Solicitado",
-                    "Data Prevista": "Data Prevista de Entrega",
-                },
-                use_container_width=True,
-            )
-
-            st.markdown("**Atualizar Status de Produção:**")
-            pid = st.number_input("Digite o ID do Pedido para alterar:", min_value=1, step=1, key="producao_id")
-            novo_status = st.selectbox("Novo Status", ["Na Fila", "Em Produção", "Finalizado"], key="producao_status")
-            if st.button("Atualizar Status", key="btn_atualizar_producao"):
-                client.table("pedidos").update({"status_producao": novo_status}).eq("id", pid).execute()
-                st.success(f"Status do pedido #{pid} alterado!")
-                st.rerun()
-        else:
-            st.info("Nenhum pedido na fila de produção.")
-
-    end_section()
-
-
-def render_estoque(client: Client) -> None:
-    begin_section("Gerenciamento de Materiais", "Controle o estoque com alertas de reposição e custos detalhados.", anchor="gerenciamento-de-materiais")
-    left, right = st.columns([1, 2])
-
-    with left:
-        st.markdown("**Adicionar/Atualizar Materiais**")
-        with st.form("form_estoque", clear_on_submit=True):
-            item = st.text_input("Nome da Matéria-Prima")
-            qtd_atual = st.number_input("Quantidade em Estoque", min_value=0.0, step=1.0)
-            qtd_min = st.number_input("Quantidade Mínima de Alerta", min_value=0.0, step=1.0)
-            custo_un = st.number_input("Preço de Custo (R$)", min_value=0.0, step=0.5)
-
-            submitted = st.form_submit_button("Salvar no Estoque")
-            if submitted and item:
-                estoque_data = {
-                    "item_nome": item,
-                    "quantidade_atual": qtd_atual,
-                    "quantidade_minima": qtd_min,
-                    "preco_custo": custo_un,
-                }
-                client.table("estoque").insert(estoque_data).execute()
-                st.success(f"{item} adicionado ao estoque com sucesso!")
-                st.rerun()
-
-    with right:
-        estoque = fetch_table(client, "estoque")
-        if estoque:
-            df_est = pd.DataFrame(estoque)
-            df_est["Status Material"] = df_est.apply(
-                lambda row: "Comprar do fornecedor" if row["quantidade_atual"] <= row["quantidade_minima"] else "Em nível seguro",
-                axis=1,
-            )
-            st.dataframe(
-                df_est[["id", "item_nome", "quantidade_atual", "quantidade_minima", "preco_custo", "Status Material"]],
-                use_container_width=True,
-            )
-        else:
-            st.info("Estoque vazio.")
-
-    end_section()
-
-
-def render_financas(client: Client) -> None:
-    begin_section("Finanças e Previsões", "Monitore receita, margem e a tendência de faturamento com inteligência.", anchor="financas-e-previsoes")
-    transacoes = fetch_table(client, "vendas_e_financas")
-
-    if transacoes:
-        df_fin = pd.DataFrame(transacoes)
-        faturamento_total = df_fin["valor_venda"].sum()
-        custos_totais = df_fin["custo_total"].sum()
-        lucro_total = df_fin["lucro_liquido"].sum()
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Faturamento Bruto Total", format_currency(faturamento_total))
-        c2.metric("Custo de Produção Total", format_currency(custos_totais))
-        c3.metric("Lucro Líquido Real", format_currency(lucro_total), delta=f"{((lucro_total / faturamento_total) * 100 if faturamento_total > 0 else 0):.1f}% Margem")
-
-        st.markdown("---")
-        st.subheader("Previsão de Tendência de Faturamento")
-
-        df_fin["data_pagamento"] = pd.to_datetime(df_fin["data_pagamento"], errors="coerce")
-        df_agrupado = (
-            df_fin.dropna(subset=["data_pagamento"]) 
-            .groupby("data_pagamento")["valor_venda"]
-            .sum()
-            .reset_index()
-            .sort_values("data_pagamento")
-        )
-
-        if len(df_agrupado) >= 2:
-            data_minima = df_agrupado["data_pagamento"].min()
-            df_agrupado["Dias_Numericos"] = (df_agrupado["data_pagamento"] - data_minima).dt.days
-            X = df_agrupado[["Dias_Numericos"]].values
-            Y = df_agrupado["valor_venda"].values
-
-            modelo_ia = LinearRegression()
-            modelo_ia.fit(X, Y)
-
-            ultimo_dia = int(df_agrupado["Dias_Numericos"].max())
-            futuro_dias = np.array([[ultimo_dia + 1], [ultimo_dia + 2], [ultimo_dia + 3]])
-            previsoes = modelo_ia.predict(futuro_dias)
-
-            st.info("💡 A inteligência artificial analisou o histórico de entradas e calculou a tendência para os próximos dias:")
-            p1, p2, p3 = st.columns(3)
-            p1.metric("🔮 Dia +1", format_currency(max(0.0, previsoes[0])))
-            p2.metric("🔮 Dia +2", format_currency(max(0.0, previsoes[1])))
-            p3.metric("🔮 Dia +3", format_currency(max(0.0, previsoes[2])))
-        else:
-            st.warning("Aguardando dados: cadastre movimentações financeiras em pelo menos duas datas diferentes para treinar o modelo.")
-
-        st.markdown("---")
-        st.markdown("**Histórico de Transações do Caixa:**")
-        df_exibir = df_fin.copy()
-        df_exibir["data_pagamento"] = df_exibir["data_pagamento"].dt.strftime("%d/%m/%Y")
-        st.dataframe(
-            df_exibir[["id", "pedido_id", "valor_venda", "custo_total", "lucro_liquido", "status_financeiro", "data_pagamento"]],
-            use_container_width=True,
-        )
-
-        st.markdown("---")
-        st.markdown("**Confirmar Recebimento de Valor:**")
-        f1, f2 = st.columns([1, 1])
-        with f1:
-            fid = st.number_input("Digite o ID do Lançamento para dar baixa:", min_value=1, step=1, key="financeiro_id")
-        with f2:
-            novo_status_fin = st.selectbox("Alterar Status Financeiro para:", ["Pendente", "Pago"], key="financeiro_status")
-
-        if st.button("Confirmar Baixa de Caixa", key="btn_baixa_financeira"):
-            try:
-                client.table("vendas_e_financas").update({"status_financeiro": novo_status_fin}).eq("id", fid).execute()
-                st.success(f"Lançamento #{fid} atualizado para {novo_status_fin} com sucesso!")
-                st.rerun()
-            except Exception as error:
-                st.error(f"Erro ao atualizar status financeiro: {error}")
-    else:
-        st.info("Nenhuma movimentação financeira registrada.")
-
-    end_section()
-
-
-def render_orcamentos(client: Client, logo_path: Path) -> None:
-    begin_section("Orçamentos Profissionais", "Gere propostas elegantes em PDF e envie automaticamente pelo WhatsApp.", anchor="orcamentos-profissionais")
-
-    with st.form("form_orcamento", clear_on_submit=True):
-        nome_servico = st.text_input("Nome do Serviço")
-        descricao_orcamento = st.text_area(
-            "Descrição do Orçamento",
-            placeholder="Descreva o serviço, acabamento e itens inclusos...",
-            height=100,
-        )
-        horas_orcamento = st.number_input("Horas estimadas", min_value=0.5, step=0.5, value=2.0, key="orc_horas")
-        custo_material_orcamento = st.number_input("Custo estimado de material (R$)", min_value=0.0, step=5.0, value=30.0, key="orc_material")
-        valor_hora = st.number_input("Valor da hora de produção (R$)", min_value=0.0, step=5.0, value=60.0, key="orc_valor_hora")
-        margem_desejada = st.number_input("Margem desejada (%)", min_value=0.0, max_value=100.0, step=1.0, value=30.0, key="orc_margem")
-        status_orcamento = st.selectbox("Status do Orçamento", ["Pendente", "Enviado", "Aprovado", "Recusado"], key="orc_status")
-        telefone_whatsapp = st.text_input("Telefone/WhatsApp", placeholder="5511999999999", key="orc_tel")
-
-        submit_orcamento = st.form_submit_button("Calcular e Salvar Orçamento")
-
-        if submit_orcamento and nome_servico:
-            custo_hora = horas_orcamento * valor_hora
-            custo_total = custo_hora + custo_material_orcamento
-            margem_decimal = margem_desejada / 100
-            valor_orcamento = custo_total / (1 - margem_decimal) if margem_decimal < 1 else custo_total
-            lucro_estimado = valor_orcamento - custo_total
-
-            orcamento_data = {
-                "nome_servico": nome_servico,
-                "descricao_orcamento": descricao_orcamento,
-                "horas_estimadas": horas_orcamento,
-                "custo_material": custo_material_orcamento,
-                "valor_hora": valor_hora,
-                "margem_desejada": margem_desejada,
-                "custo_total": custo_total,
-                "valor_orcamento": valor_orcamento,
-                "lucro_estimado": lucro_estimado,
-                "status_orcamento": status_orcamento,
-                "telefone_whatsapp": telefone_whatsapp,
-                "data_criacao": str(datetime.now()),
-            }
-
-            try:
-                client.table("orcamentos").insert(orcamento_data).execute()
-                st.success(f"Orçamento preparado e salvo para {nome_servico}")
-            except Exception:
-                dados_fallback = {k: v for k, v in orcamento_data.items() if k not in {"descricao_orcamento", "telefone_whatsapp"}}
-                client.table("orcamentos").insert(dados_fallback).execute()
-                st.success(f"Orçamento preparado e salvo para {nome_servico}")
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Custo Total", format_currency(custo_total))
-            col2.metric("Valor do Orçamento", format_currency(valor_orcamento))
-            col3.metric("Lucro Estimado", format_currency(lucro_estimado))
-
-            with st.expander("Detalhes do orçamento"):
-                st.write(f"**Descrição:** {descricao_orcamento or 'Sem descrição adicional.'}")
-                st.write(f"**Horas estimadas:** {horas_orcamento}")
-                st.write(f"**Margem desejada:** {margem_desejada}%")
-                st.write(f"**Status:** {status_orcamento}")
-
-            pdf_bytes = gerar_pdf_orcamento(
-                {
-                    "nome_servico": nome_servico,
-                    "descricao_orcamento": descricao_orcamento,
-                    "horas_estimadas": horas_orcamento,
-                    "custo_material": custo_material_orcamento,
-                    "valor_hora": valor_hora,
-                    "margem_desejada": margem_desejada,
-                    "custo_total": custo_total,
-                    "valor_orcamento": valor_orcamento,
-                    "lucro_estimado": lucro_estimado,
-                    "status_orcamento": status_orcamento,
-                    "telefone_whatsapp": telefone_whatsapp,
-                },
-                logo_path=str(logo_path) if logo_path.exists() else None,
-            )
-
-            btn1, btn2 = st.columns([1, 1])
-            with btn1:
-                st.download_button(
-                    "Baixar PDF do orçamento",
-                    data=pdf_bytes,
-                    file_name=f"orcamento_{nome_servico.lower().replace(' ', '_')}.pdf",
-                    mime="application/pdf",
+                execute(
+                    "INSERT INTO pedidos (cliente, telefone, titulo, descricao, tecnica, prazo, valor_combinado, custo_estimado, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), tecnica.strip(), prazo.isoformat() if prazo else None, valor, custo, obs.strip()),
                 )
-            with btn2:
-                if telefone_whatsapp:
-                    whatsapp_url = gerar_link_whatsapp(telefone_whatsapp, nome_servico, valor_orcamento, status_orcamento)
-                    st.markdown(f"[Enviar por WhatsApp]({whatsapp_url})")
-                else:
-                    st.info("Preencha o telefone/WhatsApp para ativar o envio.")
-
-    end_section()
-    st.markdown("---")
-
-    begin_section("Orçamentos Salvos", "Acompanhe o histórico de propostas e atualize seus status com agilidade.")
-    status_id = st.number_input("ID do orçamento para atualizar status", min_value=1, step=1, key="orc_update_id")
-    novo_status = st.selectbox("Novo status", ["Pendente", "Enviado", "Aprovado", "Recusado"], key="orc_update_status")
-    if st.button("Atualizar status do orçamento", key="btn_atualizar_orcamento"):
-        try:
-            client.table("orcamentos").update({"status_orcamento": novo_status}).eq("id", status_id).execute()
-            st.success("Status atualizado com sucesso!")
-            st.rerun()
-        except Exception as error:
-            st.error(f"Não foi possível atualizar o status: {error}")
-
-    orcamentos = fetch_table(client, "orcamentos")
-    if orcamentos:
-        df_orc = pd.DataFrame(orcamentos)
-        st.dataframe(
-            df_orc[["id", "nome_servico", "status_orcamento", "valor_orcamento", "custo_total", "lucro_estimado", "data_criacao"]],
-            use_container_width=True,
-        )
-    else:
-        st.info("Nenhum orçamento salvo ainda.")
-
-    end_section()
-
-
-def render_configuracoes(client: Client) -> None:
-    begin_section("Configurações do Sistema", "Ajuste o app, faça backups e mantenha o ateliê sempre organizado.", anchor="configuracoes-do-sistema")
-
-    st.markdown("### 💾 Backup de Segurança")
-    st.write("Baixe todas as tabelas do sistema em formato CSV para salvar em seu computador.")
-    if st.button("Gerar Arquivos de Backup", key="btn_gerar_backup"):
-        try:
-            b_pedidos = fetch_table(client, "pedidos")
-            b_financas = fetch_table(client, "vendas_e_financas")
-            b_estoque = fetch_table(client, "estoque")
-
-            csv_pedidos = pd.DataFrame(b_pedidos).to_csv(index=False).encode("utf-8")
-            csv_financas = pd.DataFrame(b_financas).to_csv(index=False).encode("utf-8")
-            csv_estoque = pd.DataFrame(b_estoque).to_csv(index=False).encode("utf-8")
-
-            st.success("Arquivos de backup gerados com sucesso.")
-            st.download_button("📥 Baixar Tabela de Pedidos", data=csv_pedidos, file_name="backup_pedidos.csv", mime="text/csv")
-            st.download_button("📥 Baixar Tabela de Finanças", data=csv_financas, file_name="backup_financas.csv", mime="text/csv")
-            st.download_button("📥 Baixar Tabela de Estoque", data=csv_estoque, file_name="backup_estoque.csv", mime="text/csv")
-        except Exception as error:
-            st.error(f"Não foi possível gerar o backup: {error}")
-
-    st.markdown("---")
-    st.markdown("### Área de Perigo: Reiniciar Sistema")
-    st.warning("Atenção: A ação abaixo apagará permanentemente todos os pedidos, finanças e estoque salvos no banco de dados!")
-
-    confirmacao = st.checkbox("Estou ciente de que esta ação é irreversível e quero apagar tudo.", key="confirmacao_reiniciar")
-    if st.button("Apagar todos os dados do banco", type="secondary", key="btn_apagar_tudo"):
-        if confirmacao:
-            try:
-                client.table("vendas_e_financas").delete().neq("id", 0).execute()
-                client.table("pedidos").delete().neq("id", 0).execute()
-                client.table("estoque").delete().neq("id", 0).execute()
-                st.success("💥 Sistema reiniciado com sucesso! Todos os dados foram apagados.")
+                st.success("Pedido cadastrado.")
                 st.rerun()
-            except Exception as error:
-                st.error(f"Erro ao limpar o banco de dados: {error}")
-        else:
-            st.error("❌ Operação cancelada. Marque a confirmação antes de continuar.")
+    with right:
+        st.subheader("Acompanhar pedido")
+        pending = rows("SELECT * FROM pedidos ORDER BY criado_em DESC")
+        if not pending:
+            st.caption("Os pedidos cadastrados aparecerão aqui.")
+            return
+        choices = {f"#{p['id']} · {p['cliente']} — {p['titulo']}": p for p in pending}
+        selected = st.selectbox("Selecione um pedido", list(choices))
+        item = choices[selected]
+        st.markdown(f'<div class="card"><b>{item["titulo"]}</b><br><span class="muted">{item["cliente"]} · Entrega: {iso_to_br(item["prazo"])}<br>Valor: {brl(item["valor_combinado"])} · Custo previsto: {brl(item["custo_estimado"])}<br><br>{item["descricao"] or "Sem detalhes adicionais."}</span></div>', unsafe_allow_html=True)
+        with st.form(f"atualiza_pedido_{item['id']}"):
+            status = st.selectbox("Etapa atual", ORDER_STATUS, index=ORDER_STATUS.index(item["status"]))
+            updated_notes = st.text_area("Observações", value=item["observacoes"] or "")
+            update = st.form_submit_button("Salvar atualização", use_container_width=True)
+        if update:
+            execute("UPDATE pedidos SET status = ?, observacoes = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", (status, updated_notes, item["id"]))
+            st.success("Pedido atualizado.")
+            st.rerun()
 
-    end_section()
+
+def quote_pdf(quote: dict[str, Any]) -> bytes:
+    output = BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    body = styles["BodyText"]
+    body.leading = 17
+    story = [Paragraph("ATELIÊ CRISTO REI", styles["Title"]), Spacer(1, 0.3*cm), Paragraph(f"<b>ORÇAMENTO {quote['numero']}</b>", styles["Heading2"]), Spacer(1, 0.4*cm)]
+    story.append(Paragraph(f"<b>Cliente:</b> {quote['cliente']}<br/><b>Emissão:</b> {datetime.now().strftime('%d/%m/%Y')}<br/><b>Validade:</b> {iso_to_br(quote['validade'])}", body))
+    story += [Spacer(1, 0.7*cm), Paragraph("<b>Descrição da encomenda</b>", styles["Heading3"]), Paragraph(quote["titulo"], body), Paragraph(quote["descricao"] or "Conforme detalhes combinados com o cliente.", body), Spacer(1, 0.55*cm)]
+    table = Table([["Investimento", brl(quote["valor"])]], colWidths=[10.5*cm, 4*cm])
+    table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#34251f")), ("TEXTCOLOR", (0, 0), (-1, -1), colors.white), ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 13), ("ALIGN", (1, 0), (1, 0), "RIGHT"), ("TOPPADDING", (0, 0), (-1, -1), 12), ("BOTTOMPADDING", (0, 0), (-1, -1), 12)]))
+    story += [table, Spacer(1, 0.65*cm), Paragraph(f"<b>Prazo de produção:</b> {quote['prazo_producao'] or 'A combinar'}", body), Spacer(1, 0.3*cm), Paragraph(f"<b>Condições:</b> {quote['condicoes'] or 'Condições de pagamento a combinar.'}", body), Spacer(1, 1.2*cm), Paragraph("Agradecemos a confiança em nosso trabalho artesanal.", body)]
+    doc.build(story)
+    return output.getvalue()
+
+
+def render_quotes() -> None:
+    st.markdown('<p class="eyebrow">Orçamentos</p><h1>Uma proposta que valoriza seu trabalho.</h1>', unsafe_allow_html=True)
+    left, right = st.columns([1.05, 1], gap="large")
+    with left:
+        st.subheader("Criar orçamento")
+        with st.form("novo_orcamento", clear_on_submit=True):
+            cliente = st.text_input("Nome do cliente *", key="q_cliente")
+            telefone = st.text_input("WhatsApp", key="q_fone")
+            titulo = st.text_input("Peça ou serviço *", key="q_titulo")
+            descricao = st.text_area("Descrição", key="q_desc")
+            a, b = st.columns(2)
+            valor = a.number_input("Valor da proposta (R$)", min_value=0.0, step=10.0, key="q_valor")
+            validade = b.date_input("Válido até", value=date.today(), format="DD/MM/YYYY")
+            prazo = st.text_input("Prazo de produção", placeholder="Ex.: até 15 dias úteis")
+            conditions = st.text_area("Condições", value="50% de sinal para início da produção e 50% na entrega.")
+            create = st.form_submit_button("Salvar orçamento", use_container_width=True)
+        if create:
+            if not cliente.strip() or not titulo.strip():
+                st.error("Informe o cliente e a peça.")
+            else:
+                number = f"{date.today():%Y}-{scalar('SELECT COUNT(*) FROM orcamentos') + 1:03d}"
+                execute("INSERT INTO orcamentos (numero, cliente, telefone, titulo, descricao, validade, valor, prazo_producao, condicoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (number, cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), validade.isoformat(), valor, prazo.strip(), conditions.strip()))
+                st.success(f"Orçamento {number} salvo.")
+                st.rerun()
+    with right:
+        st.subheader("Gerar PDF")
+        quotes = rows("SELECT * FROM orcamentos ORDER BY criado_em DESC")
+        if not quotes:
+            st.caption("Salve um orçamento para gerar o documento em PDF.")
+            return
+        selected = st.selectbox("Orçamento", [f"{q['numero']} · {q['cliente']} — {q['titulo']}" for q in quotes])
+        quote = quotes[[f"{q['numero']} · {q['cliente']} — {q['titulo']}" for q in quotes].index(selected)]
+        st.markdown(f'<div class="card"><b>{quote["numero"]}</b><br><span class="muted">{quote["cliente"]}<br>{quote["titulo"]}<br>Valor: {brl(quote["valor"])} · Válido até {iso_to_br(quote["validade"])}</span></div>', unsafe_allow_html=True)
+        st.download_button("Baixar orçamento em PDF", data=quote_pdf(quote), file_name=f"orcamento-{quote['numero']}.pdf", mime="application/pdf", use_container_width=True)
+
+
+def render_finance() -> None:
+    st.markdown('<p class="eyebrow">Financeiro</p><h1>Veja o resultado do seu trabalho.</h1>', unsafe_allow_html=True)
+    income = float(scalar("SELECT COALESCE(SUM(valor), 0) FROM transacoes WHERE tipo = 'Entrada'"))
+    expenses = float(scalar("SELECT COALESCE(SUM(valor), 0) FROM transacoes WHERE tipo = 'Saída'"))
+    a, b, c = st.columns(3)
+    a.metric("Entradas registradas", brl(income))
+    b.metric("Saídas registradas", brl(expenses))
+    c.metric("Saldo atual", brl(income-expenses))
+    left, right = st.columns([.9, 1.1], gap="large")
+    with left:
+        st.subheader("Novo lançamento")
+        with st.form("nova_transacao", clear_on_submit=True):
+            kind = st.radio("Tipo", ["Entrada", "Saída"], horizontal=True)
+            description = st.text_input("Descrição *", placeholder="Ex.: Sinal da imagem de São José")
+            value = st.number_input("Valor (R$)", min_value=0.01, step=10.0)
+            when = st.date_input("Data", value=date.today(), format="DD/MM/YYYY")
+            category = st.text_input("Categoria", placeholder="Venda, material, embalagem...")
+            options = order_options()
+            order_label = st.selectbox("Vincular a um pedido", list(options))
+            save = st.form_submit_button("Registrar lançamento", use_container_width=True)
+        if save:
+            if not description.strip():
+                st.error("Informe uma descrição.")
+            else:
+                execute("INSERT INTO transacoes (tipo, descricao, valor, data, pedido_id, categoria) VALUES (?, ?, ?, ?, ?, ?)", (kind, description.strip(), value, when.isoformat(), options[order_label], category.strip()))
+                st.success("Lançamento registrado.")
+                st.rerun()
+    with right:
+        st.subheader("Últimos lançamentos")
+        transactions = rows("SELECT t.*, p.cliente FROM transacoes t LEFT JOIN pedidos p ON t.pedido_id = p.id ORDER BY t.data DESC, t.id DESC LIMIT 20")
+        if transactions:
+            frame = pd.DataFrame(transactions)[["data", "tipo", "descricao", "categoria", "cliente", "valor"]].rename(columns={"data": "Data", "tipo": "Tipo", "descricao": "Descrição", "categoria": "Categoria", "cliente": "Pedido / cliente", "valor": "Valor"})
+            frame["Data"] = frame["Data"].map(iso_to_br)
+            frame["Valor"] = frame["Valor"].map(brl)
+            st.dataframe(frame, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Os lançamentos financeiros aparecerão aqui.")
 
 
 def main() -> None:
-    render_global_style()
-
-    url, key = load_environment()
-    client = get_supabase_client(url, key)
-    logo_path = Path(__file__).resolve().parent / "logo.jpeg"
-
-    render_header(logo_path)
-
-    if not has_supabase_connection(client):
-        st.error("❌ Erro ao conectar ao Supabase. Verifique o arquivo .env e as credenciais SUPABASE_URL e SUPABASE_KEY.")
-        return
-
-    render_summary_panel(client)
-    selected_section = st.selectbox("Selecione a área", SECTION_OPTIONS, key="section_nav")
-
-    if selected_section == "Produção":
-        render_producao(client)
-    elif selected_section == "Estoque":
-        render_estoque(client)
-    elif selected_section == "Finanças":
-        render_financas(client)
-    elif selected_section == "Orçamentos":
-        render_orcamentos(client, logo_path)
-    elif selected_section == "Configurações":
-        render_configuracoes(client)
+    database()
+    inject_style()
+    page = sidebar()
+    {"Visão geral": render_dashboard, "Pedidos": render_orders, "Orçamentos": render_quotes, "Financeiro": render_finance}[page]()
 
 
 if __name__ == "__main__":
