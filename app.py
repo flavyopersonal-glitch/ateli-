@@ -125,13 +125,13 @@ def inject_style() -> None:
           [data-testid="stSidebar"] .stRadio label { border-radius: 9px; padding: .45rem .55rem; margin: .12rem 0; font-weight: 600; }
           [data-testid="stSidebar"] .stRadio label:hover { background: rgba(255,255,255,.10); }
           [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #E9D5AC !important; }
-          .block-container { max-width: 1220px; padding-top: 1.45rem; padding-bottom: 3.4rem; }
+          .block-container { max-width: 1220px; padding-top: 3.15rem; padding-bottom: 3.4rem; }
           h1, h2, h3 { font-family: Georgia, 'Times New Roman', serif; color: var(--vinho-escuro); letter-spacing: -.015em; }
           h1 { font-size: 2.55rem !important; margin-bottom: 1.4rem !important; }
           h2 { font-size: 1.65rem !important; margin-top: .6rem !important; }
           h3 { font-size: 1.16rem !important; }
           .brand-top { border-bottom: 1px solid #E9DCC6; padding-bottom: .85rem; margin-bottom: 1.7rem; }
-          .brand-kicker { color: #9A6D1B; font-size: .70rem; letter-spacing: .18em; text-transform: uppercase; font-weight: 800; margin: 0 0 .12rem; }
+          .brand-kicker { color: #9A6D1B; font-size: .70rem; line-height: 1.45; letter-spacing: .18em; text-transform: uppercase; font-weight: 800; margin: 0 0 .12rem; }
           .brand-name { color: var(--vinho); font-family: Georgia, serif; font-size: 1.42rem; font-weight: 700; margin: 0; }
           .brand-tagline { color: #76645A; font-size: .84rem; margin: .15rem 0 0; }
           .eyebrow { color: #9A6D1B; text-transform: uppercase; font-weight: 800; letter-spacing: .15em; font-size: .70rem; margin-bottom: .25rem; }
@@ -151,7 +151,7 @@ def inject_style() -> None:
           label, [data-testid="stWidgetLabel"] p { color: #4E3933 !important; font-size: .88rem !important; font-weight: 650 !important; }
           [data-testid="stForm"] { background: #FFFDF8; border: 1px solid #E9DCC6; border-radius: 12px; padding: 1.15rem 1.2rem .8rem; }
           hr { border-color: #E9DCC6 !important; }
-          @media (max-width: 700px) { .block-container { padding: 1rem .8rem 2rem; } h1 { font-size: 2rem !important; } .hero { padding: 1.35rem; } }
+          @media (max-width: 700px) { .block-container { padding: 2.6rem .8rem 2rem; } h1 { font-size: 2rem !important; } .hero { padding: 1.35rem; } }
         </style>
         """,
         unsafe_allow_html=True,
