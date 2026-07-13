@@ -118,22 +118,40 @@ def inject_style() -> None:
     st.markdown(
         """
         <style>
-          .stApp { background: #f7f3ed; color: #2d2521; }
-          [data-testid="stSidebar"] { background: #34251f; }
-          [data-testid="stSidebar"] * { color: #fbf6ee !important; }
-          .block-container { max-width: 1240px; padding-top: 2.2rem; padding-bottom: 3rem; }
-          h1, h2, h3 { font-family: Georgia, serif; color: #34251f; }
-          .eyebrow { color: #a44e2c; text-transform: uppercase; font-weight: 700; letter-spacing: .14em; font-size: .76rem; margin-bottom: .2rem; }
-          .hero { background: #34251f; color: #fff8ec; border-radius: 20px; padding: 2rem; margin: .8rem 0 1.6rem; }
-          .hero h2 { color: #fff8ec; margin: 0 0 .4rem; }
-          .hero p { color: #e6d6c3; margin: 0; }
-          div[data-testid="stMetric"] { background: #fffdf9; border: 1px solid #eaded1; border-radius: 14px; padding: .8rem; }
-          .stButton > button, .stDownloadButton > button { background: #a44e2c; color: white; border: none; border-radius: 9px; font-weight: 600; }
-          .stButton > button:hover, .stDownloadButton > button:hover { background: #7e3920; color: white; }
-          .card { background: #fffdf9; border: 1px solid #eaded1; padding: 1.25rem; border-radius: 14px; }
-          .muted { color: #766863; }
-          .stDataFrame { border: 1px solid #eaded1; border-radius: 12px; overflow: hidden; }
-          @media (max-width: 700px) { .block-container { padding: 1.1rem .8rem; } .hero { padding: 1.3rem; } }
+          :root { --vinho: #560D1B; --vinho-escuro: #310811; --ouro: #B98728; --creme: #FBF8F1; --texto: #2C2020; }
+          .stApp { background: var(--creme); color: var(--texto); }
+          [data-testid="stSidebar"] { background: linear-gradient(180deg, #4A0A18 0%, #26050C 100%); border-right: 1px solid rgba(185,135,40,.45); }
+          [data-testid="stSidebar"] * { color: #FFF9EF !important; }
+          [data-testid="stSidebar"] .stRadio label { border-radius: 9px; padding: .45rem .55rem; margin: .12rem 0; font-weight: 600; }
+          [data-testid="stSidebar"] .stRadio label:hover { background: rgba(255,255,255,.10); }
+          [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #E9D5AC !important; }
+          .block-container { max-width: 1220px; padding-top: 1.45rem; padding-bottom: 3.4rem; }
+          h1, h2, h3 { font-family: Georgia, 'Times New Roman', serif; color: var(--vinho-escuro); letter-spacing: -.015em; }
+          h1 { font-size: 2.55rem !important; margin-bottom: 1.4rem !important; }
+          h2 { font-size: 1.65rem !important; margin-top: .6rem !important; }
+          h3 { font-size: 1.16rem !important; }
+          .brand-top { border-bottom: 1px solid #E9DCC6; padding-bottom: .85rem; margin-bottom: 1.7rem; }
+          .brand-kicker { color: #9A6D1B; font-size: .70rem; letter-spacing: .18em; text-transform: uppercase; font-weight: 800; margin: 0 0 .12rem; }
+          .brand-name { color: var(--vinho); font-family: Georgia, serif; font-size: 1.42rem; font-weight: 700; margin: 0; }
+          .brand-tagline { color: #76645A; font-size: .84rem; margin: .15rem 0 0; }
+          .eyebrow { color: #9A6D1B; text-transform: uppercase; font-weight: 800; letter-spacing: .15em; font-size: .70rem; margin-bottom: .25rem; }
+          .hero { background: linear-gradient(112deg, #4A0A18 0%, #74162A 65%, #8E6520 170%); color: #FFF9EF; border: 1px solid rgba(185,135,40,.55); border-radius: 16px; padding: 1.9rem 2.1rem; margin: .4rem 0 1.5rem; box-shadow: 0 13px 30px rgba(72, 10, 24, .14); }
+          .hero h2 { color: #FFF9EF; margin: 0 0 .4rem !important; }
+          .hero p { color: #F2E4C9; margin: 0; max-width: 680px; line-height: 1.6; }
+          div[data-testid="stMetric"] { background: #FFFDF8; border: 1px solid #E9DCC6; border-top: 3px solid #B98728; border-radius: 11px; padding: .9rem 1rem; box-shadow: 0 5px 14px rgba(58, 32, 21, .04); }
+          [data-testid="stMetricLabel"] { color: #78635A !important; font-size: .83rem; }
+          [data-testid="stMetricValue"] { color: var(--vinho) !important; font-family: Georgia, serif; }
+          .stButton > button, .stDownloadButton > button { background: var(--vinho); color: #FFF9EF; border: 1px solid var(--vinho); border-radius: 7px; font-weight: 700; min-height: 2.7rem; transition: all .18s ease; }
+          .stButton > button:hover, .stDownloadButton > button:hover { background: #75172A; border-color: #75172A; color: white; transform: translateY(-1px); box-shadow: 0 5px 14px rgba(86,13,27,.16); }
+          .card { background: #FFFDF8; border: 1px solid #E9DCC6; border-radius: 11px; padding: 1.25rem; line-height: 1.65; }
+          .muted { color: #76645A; }
+          .stDataFrame { border: 1px solid #E9DCC6; border-radius: 10px; overflow: hidden; }
+          div[data-baseweb="input"] > div, div[data-baseweb="select"] > div, .stTextArea textarea { background: #FFFDF9 !important; border-color: #D9C8B1 !important; border-radius: 7px !important; }
+          div[data-baseweb="input"] > div:focus-within, div[data-baseweb="select"] > div:focus-within, .stTextArea textarea:focus { border-color: #9A6D1B !important; box-shadow: 0 0 0 1px #9A6D1B !important; }
+          label, [data-testid="stWidgetLabel"] p { color: #4E3933 !important; font-size: .88rem !important; font-weight: 650 !important; }
+          [data-testid="stForm"] { background: #FFFDF8; border: 1px solid #E9DCC6; border-radius: 12px; padding: 1.15rem 1.2rem .8rem; }
+          hr { border-color: #E9DCC6 !important; }
+          @media (max-width: 700px) { .block-container { padding: 1rem .8rem 2rem; } h1 { font-size: 2rem !important; } .hero { padding: 1.35rem; } }
         </style>
         """,
         unsafe_allow_html=True,
@@ -142,13 +160,25 @@ def inject_style() -> None:
 
 def sidebar() -> str:
     with st.sidebar:
-        st.markdown("## ✦ Ateliê Cristo Rei")
-        st.caption("Gestão feita para o seu processo criativo")
+        st.image("logo.jpeg", width=126)
+        st.markdown("## Ateliê Cristo Rei")
+        st.caption("Arte sacra feita com propósito")
         st.divider()
         page = st.radio("Navegação", ["Visão geral", "Pedidos", "Orçamentos", "Financeiro"], label_visibility="collapsed")
         st.divider()
-        st.caption("Os dados ficam salvos neste computador.")
+        st.caption("Gestão de pedidos, orçamentos e finanças.")
     return page
+
+
+def render_brand_header(page: str) -> None:
+    icon, copy = st.columns([1, 13], gap="small")
+    with icon:
+        st.image("logo.jpeg", width=50)
+    with copy:
+        st.markdown(
+            f'<div class="brand-top"><p class="brand-kicker">Ateliê Cristo Rei · {page}</p><p class="brand-name">Gestão do ateliê</p><p class="brand-tagline">Pedidos organizados, clientes bem atendidos.</p></div>',
+            unsafe_allow_html=True,
+        )
 
 
 def order_options() -> dict[str, int | None]:
@@ -329,6 +359,7 @@ def main() -> None:
     database()
     inject_style()
     page = sidebar()
+    render_brand_header(page)
     {"Visão geral": render_dashboard, "Pedidos": render_orders, "Orçamentos": render_quotes, "Financeiro": render_finance}[page]()
 
 
