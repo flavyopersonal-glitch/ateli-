@@ -10,18 +10,21 @@ from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 import pandas as pd
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 APP_NAME = "Ateliê Cristo Rei"
 DB_PATH = Path("data") / "atelie.db"
+LOGO_PATH = Path(__file__).with_name("logo.jpeg")
 ORDER_STATUS = ["Novo pedido", "Em produção", "Aguardando aprovação", "Pronto para entrega", "Entregue", "Cancelado"]
 
 st.set_page_config(page_title=APP_NAME, page_icon="✦", layout="wide", initial_sidebar_state="expanded")
@@ -272,19 +275,48 @@ def render_orders() -> None:
             reload_page()
 
 
+def quote_pdf_footer(canvas, doc) -> None:
+    canvas.saveState()
+    canvas.setStrokeColor(colors.HexColor("#B98728"))
+    canvas.setLineWidth(0.7)
+    canvas.line(doc.leftMargin, 1.55 * cm, A4[0] - doc.rightMargin, 1.55 * cm)
+    canvas.setFillColor(colors.HexColor("#765D42"))
+    canvas.setFont("Helvetica", 8)
+    canvas.drawString(doc.leftMargin, 1.05 * cm, "ATELIÊ CRISTO REI  •  Arte sacra feita com propósito")
+    canvas.drawRightString(A4[0] - doc.rightMargin, 1.05 * cm, f"Proposta {doc.page}")
+    canvas.restoreState()
+
+
 def quote_pdf(quote: dict[str, Any]) -> bytes:
     output = BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=1.55*cm, bottomMargin=2.25*cm)
     styles = getSampleStyleSheet()
-    body = styles["BodyText"]
-    body.leading = 17
-    story = [Paragraph("ATELIÊ CRISTO REI", styles["Title"]), Spacer(1, 0.3*cm), Paragraph(f"<b>ORÇAMENTO {quote['numero']}</b>", styles["Heading2"]), Spacer(1, 0.4*cm)]
-    story.append(Paragraph(f"<b>Cliente:</b> {quote['cliente']}<br/><b>Emissão:</b> {datetime.now().strftime('%d/%m/%Y')}<br/><b>Validade:</b> {iso_to_br(quote['validade'])}", body))
-    story += [Spacer(1, 0.7*cm), Paragraph("<b>Descrição da encomenda</b>", styles["Heading3"]), Paragraph(quote["titulo"], body), Paragraph(quote["descricao"] or "Conforme detalhes combinados com o cliente.", body), Spacer(1, 0.55*cm)]
-    table = Table([["Investimento", brl(quote["valor"])]], colWidths=[10.5*cm, 4*cm])
-    table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#34251f")), ("TEXTCOLOR", (0, 0), (-1, -1), colors.white), ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 13), ("ALIGN", (1, 0), (1, 0), "RIGHT"), ("TOPPADDING", (0, 0), (-1, -1), 12), ("BOTTOMPADDING", (0, 0), (-1, -1), 12)]))
-    story += [table, Spacer(1, 0.65*cm), Paragraph(f"<b>Prazo de produção:</b> {quote['prazo_producao'] or 'A combinar'}", body), Spacer(1, 0.3*cm), Paragraph(f"<b>Condições:</b> {quote['condicoes'] or 'Condições de pagamento a combinar.'}", body), Spacer(1, 1.2*cm), Paragraph("Agradecemos a confiança em nosso trabalho artesanal.", body)]
-    doc.build(story)
+    body = ParagraphStyle("proposal_body", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.3, leading=16, textColor=colors.HexColor("#352A25"))
+    label = ParagraphStyle("proposal_label", parent=body, fontName="Helvetica-Bold", fontSize=8.3, leading=12, textColor=colors.HexColor("#8C651D"), spaceAfter=2)
+    value = ParagraphStyle("proposal_value", parent=body, fontName="Helvetica-Bold", fontSize=11.5, leading=15, textColor=colors.HexColor("#4A0A18"))
+    section = ParagraphStyle("proposal_section", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=12, leading=16, textColor=colors.HexColor("#560D1B"), spaceAfter=6)
+    company = ParagraphStyle("proposal_company", parent=body, fontName="Helvetica-Bold", fontSize=17, leading=20, textColor=colors.HexColor("#560D1B"))
+    slogan = ParagraphStyle("proposal_slogan", parent=body, fontSize=8.5, leading=12, textColor=colors.HexColor("#8C651D"))
+    doc_title = ParagraphStyle("proposal_title", parent=body, fontName="Helvetica-Bold", fontSize=14, leading=17, textColor=colors.HexColor("#560D1B"), alignment=TA_RIGHT)
+    doc_meta = ParagraphStyle("proposal_meta", parent=body, fontSize=8.5, leading=12, textColor=colors.HexColor("#765D42"), alignment=TA_RIGHT)
+
+    logo = Image(str(LOGO_PATH), width=1.9*cm, height=1.9*cm)
+    brand = Table([[logo, [Paragraph("ATELIÊ CRISTO REI", company), Paragraph("Arte sacra feita com propósito", slogan)], [Paragraph("ORÇAMENTO", doc_title), Paragraph(f"Nº {escape(str(quote['numero']))}<br/>Emitido em {datetime.now().strftime('%d/%m/%Y')}", doc_meta)]]], colWidths=[2.2*cm, 8.0*cm, 4.6*cm])
+    brand.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("LINEBELOW", (0, 0), (-1, -1), 1.1, colors.HexColor("#B98728"))]))
+
+    client = Table([[Paragraph("CLIENTE", label), Paragraph("VALIDADE", label)], [Paragraph(escape(str(quote["cliente"])), value), Paragraph(iso_to_br(quote["validade"]), value)]], colWidths=[10.2*cm, 4.6*cm])
+    client.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8F1E5")), ("BOX", (0, 0), (-1, -1), .5, colors.HexColor("#E4D1A7")), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12), ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 9)]))
+
+    table = Table([["INVESTIMENTO", brl(quote["valor"])]], colWidths=[10.5*cm, 4.3*cm])
+    table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#560D1B")), ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#FFF9EF")), ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 12), ("ALIGN", (1, 0), (1, 0), "RIGHT"), ("TOPPADDING", (0, 0), (-1, -1), 13), ("BOTTOMPADDING", (0, 0), (-1, -1), 13), ("LEFTPADDING", (0, 0), (-1, -1), 13), ("RIGHTPADDING", (0, 0), (-1, -1), 13), ("LINEABOVE", (0, 0), (-1, -1), 2, colors.HexColor("#B98728"))]))
+
+    title = escape(str(quote["titulo"]))
+    description = escape(str(quote["descricao"] or "Conforme detalhes combinados com o cliente.")).replace("\n", "<br/>")
+    timing = escape(str(quote["prazo_producao"] or "A combinar"))
+    conditions = escape(str(quote["condicoes"] or "Condições de pagamento a combinar.")).replace("\n", "<br/>")
+    story = [brand, Spacer(1, .65*cm), client, Spacer(1, .75*cm), Paragraph("DETALHES DA ENCOMENDA", section), Paragraph(title, value), Spacer(1, .18*cm), Paragraph(description, body), Spacer(1, .7*cm), table, Spacer(1, .7*cm), Paragraph("PRAZO DE PRODUÇÃO", label), Paragraph(timing, body), Spacer(1, .42*cm), Paragraph("CONDIÇÕES", label), Paragraph(conditions, body), Spacer(1, 1.0*cm), Paragraph("Agradecemos a confiança em nosso trabalho. Será uma alegria transformar sua encomenda em uma peça especial.", ParagraphStyle("closing", parent=body, alignment=TA_CENTER, textColor=colors.HexColor("#765D42"), fontSize=9.3, leading=14))]
+    doc.title = f"Orçamento {quote['numero']} — Ateliê Cristo Rei"
+    doc.build(story, onFirstPage=quote_pdf_footer, onLaterPages=quote_pdf_footer)
     return output.getvalue()
 
 
