@@ -105,6 +105,14 @@ def execute(sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
     return cur
 
 
+def reload_page() -> None:
+    """Atualiza a tela em versões antigas e novas do Streamlit."""
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
+
+
 def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
     return [dict(row) for row in database().execute(sql, params).fetchall()]
 
@@ -243,7 +251,7 @@ def render_orders() -> None:
                     (cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), tecnica.strip(), prazo.isoformat() if prazo else None, valor, custo, obs.strip()),
                 )
                 st.success("Pedido cadastrado.")
-                st.rerun()
+                reload_page()
     with right:
         st.subheader("Acompanhar pedido")
         pending = rows("SELECT * FROM pedidos ORDER BY criado_em DESC")
@@ -261,7 +269,7 @@ def render_orders() -> None:
         if update:
             execute("UPDATE pedidos SET status = ?, observacoes = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", (status, updated_notes, item["id"]))
             st.success("Pedido atualizado.")
-            st.rerun()
+            reload_page()
 
 
 def quote_pdf(quote: dict[str, Any]) -> bytes:
@@ -303,7 +311,7 @@ def render_quotes() -> None:
                 number = f"{date.today():%Y}-{scalar('SELECT COUNT(*) FROM orcamentos') + 1:03d}"
                 execute("INSERT INTO orcamentos (numero, cliente, telefone, titulo, descricao, validade, valor, prazo_producao, condicoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (number, cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), validade.isoformat(), valor, prazo.strip(), conditions.strip()))
                 st.success(f"Orçamento {number} salvo.")
-                st.rerun()
+                reload_page()
     with right:
         st.subheader("Gerar PDF")
         quotes = rows("SELECT * FROM orcamentos ORDER BY criado_em DESC")
@@ -342,7 +350,7 @@ def render_finance() -> None:
             else:
                 execute("INSERT INTO transacoes (tipo, descricao, valor, data, pedido_id, categoria) VALUES (?, ?, ?, ?, ?, ?)", (kind, description.strip(), value, when.isoformat(), options[order_label], category.strip()))
                 st.success("Lançamento registrado.")
-                st.rerun()
+                reload_page()
     with right:
         st.subheader("Últimos lançamentos")
         transactions = rows("SELECT t.*, p.cliente FROM transacoes t LEFT JOIN pedidos p ON t.pedido_id = p.id ORDER BY t.data DESC, t.id DESC LIMIT 20")
