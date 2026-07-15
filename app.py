@@ -69,6 +69,19 @@ def estimated_completion(start: date, hours: float) -> date:
     return current
 
 
+def deadline_priority(deadline: str | None) -> str:
+    if not deadline:
+        return "Sem prazo"
+    remaining = (date.fromisoformat(deadline) - date.today()).days
+    if remaining < 0:
+        return f"Vencido há {abs(remaining)} dia(s)"
+    if remaining == 0:
+        return "Entrega hoje"
+    if remaining == 1:
+        return "Entrega amanhã"
+    return f"Entrega em {remaining} dias"
+
+
 @st.cache_resource
 def database() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(exist_ok=True)
@@ -86,6 +99,7 @@ def database() -> sqlite3.Connection:
             tecnica TEXT,
             prazo TEXT,
             horas_estimadas REAL NOT NULL DEFAULT 0,
+            exige_fabricacao INTEGER NOT NULL DEFAULT 1,
             status TEXT NOT NULL DEFAULT 'Novo pedido',
             valor_combinado REAL NOT NULL DEFAULT 0,
             custo_estimado REAL NOT NULL DEFAULT 0,
@@ -127,6 +141,8 @@ def database() -> sqlite3.Connection:
     columns = {column["name"] for column in conn.execute("PRAGMA table_info(pedidos)")}
     if "horas_estimadas" not in columns:
         conn.execute("ALTER TABLE pedidos ADD COLUMN horas_estimadas REAL NOT NULL DEFAULT 0")
+    if "exige_fabricacao" not in columns:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN exige_fabricacao INTEGER NOT NULL DEFAULT 1")
     conn.commit()
     return conn
 
@@ -246,12 +262,18 @@ def render_dashboard() -> None:
     attention = rows(
         """SELECT id, cliente, titulo, prazo, horas_estimadas, status FROM pedidos
            WHERE status NOT IN ('Entregue', 'Cancelado')
-           ORDER BY CASE WHEN prazo IS NULL THEN 1 ELSE 0 END, prazo ASC LIMIT 8"""
+           ORDER BY CASE
+                WHEN prazo IS NULL THEN 2
+                WHEN prazo < date('now') THEN 0
+                ELSE 1
+            END, prazo ASC LIMIT 8"""
     )
     if attention:
         frame = pd.DataFrame(attention).rename(columns={"id": "Nº", "cliente": "Cliente", "titulo": "Peça", "prazo": "Prazo", "horas_estimadas": "Horas", "status": "Etapa"})
+        frame["Prioridade"] = frame["Prazo"].map(deadline_priority)
         frame["Prazo"] = frame["Prazo"].map(iso_to_br)
         frame["Horas"] = frame["Horas"].map(lambda hours: f"{float(hours or 0):g}h")
+        frame = frame[["Prioridade", "Prazo", "Nº", "Cliente", "Peça", "Horas", "Etapa"]]
         st.dataframe(frame, use_container_width=True, hide_index=True)
     else:
         st.info("Ainda não há pedidos. Comece adicionando o primeiro pedido na aba Pedidos.")
@@ -267,10 +289,12 @@ def render_orders() -> None:
             telefone = st.text_input("WhatsApp")
             titulo = st.text_input("Peça ou encomenda *", placeholder="Ex.: Imagem de Nossa Senhora Aparecida")
             descricao = st.text_area("Detalhes da peça", placeholder="Tamanho, cores, acabamento e referências")
-            a, b, c = st.columns(3)
+            a, b = st.columns(2)
             tecnica = a.text_input("Técnica / acabamento", placeholder="Pintura artesanal")
-            horas = b.number_input("Horas de produção", min_value=0.0, step=0.5, help="Estimativa de horas necessárias para produzir a peça.")
-            prazo = c.date_input("Prazo de entrega", value=None, format="DD/MM/YYYY")
+            fabrication = b.selectbox("Exige fabricação?", ["Sim", "Não"], help="Informe se a peça precisa ser fabricada antes da pintura ou acabamento.")
+            c, d = st.columns(2)
+            horas = c.number_input("Horas de produção", min_value=0.0, step=0.5, help="Estimativa de horas necessárias para produzir a peça.")
+            prazo = d.date_input("Prazo de entrega", value=None, format="DD/MM/YYYY")
             if horas:
                 days_needed = workdays_for_hours(horas)
                 finish_date = estimated_completion(date.today(), horas)
@@ -287,8 +311,8 @@ def render_orders() -> None:
                 st.error("Informe o nome do cliente e a peça.")
             else:
                 execute(
-                    "INSERT INTO pedidos (cliente, telefone, titulo, descricao, tecnica, prazo, horas_estimadas, valor_combinado, custo_estimado, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), tecnica.strip(), prazo.isoformat() if prazo else None, horas, valor, custo, obs.strip()),
+                    "INSERT INTO pedidos (cliente, telefone, titulo, descricao, tecnica, prazo, horas_estimadas, exige_fabricacao, valor_combinado, custo_estimado, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), tecnica.strip(), prazo.isoformat() if prazo else None, horas, fabrication == "Sim", valor, custo, obs.strip()),
                 )
                 st.success("Pedido cadastrado.")
                 reload_page()
@@ -303,14 +327,16 @@ def render_orders() -> None:
         item = choices[selected]
         hours = float(item.get("horas_estimadas") or 0)
         production_time = f"{hours:g}h previstas · {workdays_for_hours(hours)} dia(s) útil(eis)" if hours else "Tempo de produção não informado"
-        st.markdown(f'<div class="card"><b>{item["titulo"]}</b><br><span class="muted">{item["cliente"]} · Entrega: {iso_to_br(item["prazo"])}<br>Produção: {production_time}<br>Valor: {brl(item["valor_combinado"])} · Custo previsto: {brl(item["custo_estimado"])}<br><br>{item["descricao"] or "Sem detalhes adicionais."}</span></div>', unsafe_allow_html=True)
+        fabrication_status = "Sim" if item.get("exige_fabricacao", 1) else "Não"
+        st.markdown(f'<div class="card"><b>{item["titulo"]}</b><br><span class="muted">{item["cliente"]} · Entrega: {iso_to_br(item["prazo"])}<br>Exige fabricação: {fabrication_status}<br>Produção: {production_time}<br>Valor: {brl(item["valor_combinado"])} · Custo previsto: {brl(item["custo_estimado"])}<br><br>{item["descricao"] or "Sem detalhes adicionais."}</span></div>', unsafe_allow_html=True)
         with st.form(f"atualiza_pedido_{item['id']}"):
             status = st.selectbox("Etapa atual", ORDER_STATUS, index=ORDER_STATUS.index(item["status"]))
             updated_hours = st.number_input("Horas de produção", min_value=0.0, step=0.5, value=hours)
+            updated_fabrication = st.selectbox("Exige fabricação?", ["Sim", "Não"], index=0 if fabrication_status == "Sim" else 1)
             updated_notes = st.text_area("Observações", value=item["observacoes"] or "")
             update = st.form_submit_button("Salvar atualização", use_container_width=True)
         if update:
-            execute("UPDATE pedidos SET status = ?, horas_estimadas = ?, observacoes = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", (status, updated_hours, updated_notes, item["id"]))
+            execute("UPDATE pedidos SET status = ?, horas_estimadas = ?, exige_fabricacao = ?, observacoes = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", (status, updated_hours, updated_fabrication == "Sim", updated_notes, item["id"]))
             st.success("Pedido atualizado.")
             reload_page()
 
