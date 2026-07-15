@@ -6,8 +6,9 @@ Aplicação independente, com banco SQLite criado automaticamente em data/atelie
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import BytesIO
+from math import ceil
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
@@ -25,6 +26,7 @@ from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Tabl
 APP_NAME = "Ateliê Cristo Rei"
 DB_PATH = Path("data") / "atelie.db"
 LOGO_PATH = Path(__file__).with_name("logo.jpeg")
+CAPACIDADE_DIARIA_HORAS = 8
 ORDER_STATUS = ["Novo pedido", "Em produção", "Aguardando aprovação", "Pronto para entrega", "Entregue", "Cancelado"]
 
 st.set_page_config(page_title=APP_NAME, page_icon="✦", layout="wide", initial_sidebar_state="expanded")
@@ -44,6 +46,29 @@ def iso_to_br(value: str | None) -> str:
         return value
 
 
+def workdays_for_hours(hours: float) -> int:
+    """Converte horas de produção em dias úteis de 8 horas."""
+    return ceil(max(hours, 0) / CAPACIDADE_DIARIA_HORAS)
+
+
+def estimated_completion(start: date, hours: float) -> date:
+    """Calcula a conclusão, contando somente segunda a sexta-feira."""
+    remaining_days = workdays_for_hours(hours)
+    current = start
+
+    while current.weekday() >= 5:
+        current += timedelta(days=1)
+
+    while remaining_days:
+        if current.weekday() < 5:
+            remaining_days -= 1
+            if remaining_days == 0:
+                return current
+        current += timedelta(days=1)
+
+    return current
+
+
 @st.cache_resource
 def database() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(exist_ok=True)
@@ -60,6 +85,7 @@ def database() -> sqlite3.Connection:
             descricao TEXT,
             tecnica TEXT,
             prazo TEXT,
+            horas_estimadas REAL NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'Novo pedido',
             valor_combinado REAL NOT NULL DEFAULT 0,
             custo_estimado REAL NOT NULL DEFAULT 0,
@@ -98,6 +124,9 @@ def database() -> sqlite3.Connection:
         );
         """
     )
+    columns = {column["name"] for column in conn.execute("PRAGMA table_info(pedidos)")}
+    if "horas_estimadas" not in columns:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN horas_estimadas REAL NOT NULL DEFAULT 0")
     conn.commit()
     return conn
 
@@ -237,12 +266,19 @@ def render_orders() -> None:
             telefone = st.text_input("WhatsApp")
             titulo = st.text_input("Peça ou encomenda *", placeholder="Ex.: Imagem de Nossa Senhora Aparecida")
             descricao = st.text_area("Detalhes da peça", placeholder="Tamanho, cores, acabamento e referências")
-            a, b = st.columns(2)
+            a, b, c = st.columns(3)
             tecnica = a.text_input("Técnica / acabamento", placeholder="Pintura artesanal")
-            prazo = b.date_input("Prazo de entrega", value=None, format="DD/MM/YYYY")
-            c, d = st.columns(2)
-            valor = c.number_input("Valor combinado (R$)", min_value=0.0, step=10.0)
-            custo = d.number_input("Custo estimado (R$)", min_value=0.0, step=10.0)
+            horas = b.number_input("Horas de produção", min_value=0.0, step=0.5, help="Estimativa de horas necessárias para produzir a peça.")
+            prazo = c.date_input("Prazo de entrega", value=None, format="DD/MM/YYYY")
+            if horas:
+                days_needed = workdays_for_hours(horas)
+                finish_date = estimated_completion(date.today(), horas)
+                st.caption(f"Estimativa: {days_needed} dia(s) útil(eis) de trabalho · conclusão prevista em {finish_date.strftime('%d/%m/%Y')}.")
+                if prazo and finish_date > prazo:
+                    st.warning("A estimativa de produção ultrapassa o prazo informado.")
+            d, e = st.columns(2)
+            valor = d.number_input("Valor combinado (R$)", min_value=0.0, step=10.0)
+            custo = e.number_input("Custo estimado (R$)", min_value=0.0, step=10.0)
             obs = st.text_area("Observações internas")
             saved = st.form_submit_button("Cadastrar pedido", use_container_width=True)
         if saved:
@@ -250,8 +286,8 @@ def render_orders() -> None:
                 st.error("Informe o nome do cliente e a peça.")
             else:
                 execute(
-                    "INSERT INTO pedidos (cliente, telefone, titulo, descricao, tecnica, prazo, valor_combinado, custo_estimado, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), tecnica.strip(), prazo.isoformat() if prazo else None, valor, custo, obs.strip()),
+                    "INSERT INTO pedidos (cliente, telefone, titulo, descricao, tecnica, prazo, horas_estimadas, valor_combinado, custo_estimado, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), tecnica.strip(), prazo.isoformat() if prazo else None, horas, valor, custo, obs.strip()),
                 )
                 st.success("Pedido cadastrado.")
                 reload_page()
@@ -264,13 +300,16 @@ def render_orders() -> None:
         choices = {f"#{p['id']} · {p['cliente']} — {p['titulo']}": p for p in pending}
         selected = st.selectbox("Selecione um pedido", list(choices))
         item = choices[selected]
-        st.markdown(f'<div class="card"><b>{item["titulo"]}</b><br><span class="muted">{item["cliente"]} · Entrega: {iso_to_br(item["prazo"])}<br>Valor: {brl(item["valor_combinado"])} · Custo previsto: {brl(item["custo_estimado"])}<br><br>{item["descricao"] or "Sem detalhes adicionais."}</span></div>', unsafe_allow_html=True)
+        hours = float(item.get("horas_estimadas") or 0)
+        production_time = f"{hours:g}h previstas · {workdays_for_hours(hours)} dia(s) útil(eis)" if hours else "Tempo de produção não informado"
+        st.markdown(f'<div class="card"><b>{item["titulo"]}</b><br><span class="muted">{item["cliente"]} · Entrega: {iso_to_br(item["prazo"])}<br>Produção: {production_time}<br>Valor: {brl(item["valor_combinado"])} · Custo previsto: {brl(item["custo_estimado"])}<br><br>{item["descricao"] or "Sem detalhes adicionais."}</span></div>', unsafe_allow_html=True)
         with st.form(f"atualiza_pedido_{item['id']}"):
             status = st.selectbox("Etapa atual", ORDER_STATUS, index=ORDER_STATUS.index(item["status"]))
+            updated_hours = st.number_input("Horas de produção", min_value=0.0, step=0.5, value=hours)
             updated_notes = st.text_area("Observações", value=item["observacoes"] or "")
             update = st.form_submit_button("Salvar atualização", use_container_width=True)
         if update:
-            execute("UPDATE pedidos SET status = ?, observacoes = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", (status, updated_notes, item["id"]))
+            execute("UPDATE pedidos SET status = ?, horas_estimadas = ?, observacoes = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", (status, updated_hours, updated_notes, item["id"]))
             st.success("Pedido atualizado.")
             reload_page()
 
@@ -391,6 +430,46 @@ def render_finance() -> None:
             frame["Data"] = frame["Data"].map(iso_to_br)
             frame["Valor"] = frame["Valor"].map(brl)
             st.dataframe(frame, use_container_width=True, hide_index=True)
+
+            with st.expander("Editar ou excluir lançamento"):
+                transaction_choices = {
+                    f"#{transaction['id']} · {iso_to_br(transaction['data'])} · {transaction['descricao']} · {brl(transaction['valor'])}": transaction
+                    for transaction in rows("SELECT * FROM transacoes ORDER BY data DESC, id DESC")
+                }
+                selected_label = st.selectbox("Lançamento", list(transaction_choices), key="transacao_para_editar")
+                selected_transaction = transaction_choices[selected_label]
+                options = order_options()
+                current_order_index = list(options.values()).index(selected_transaction["pedido_id"]) if selected_transaction["pedido_id"] in options.values() else 0
+
+                with st.form(f"editar_transacao_{selected_transaction['id']}"):
+                    kind = st.radio("Tipo", ["Entrada", "Saída"], index=["Entrada", "Saída"].index(selected_transaction["tipo"]), horizontal=True)
+                    description = st.text_input("Descrição *", value=selected_transaction["descricao"])
+                    value = st.number_input("Valor (R$)", min_value=0.01, step=10.0, value=float(selected_transaction["valor"]))
+                    when = st.date_input("Data", value=date.fromisoformat(selected_transaction["data"]), format="DD/MM/YYYY")
+                    category = st.text_input("Categoria", value=selected_transaction["categoria"] or "")
+                    order_label = st.selectbox("Vincular a um pedido", list(options), index=current_order_index)
+                    confirm_delete = st.checkbox("Confirmo que desejo excluir este lançamento definitivamente.")
+                    save_col, delete_col = st.columns(2)
+                    save_changes = save_col.form_submit_button("Salvar alterações", use_container_width=True)
+                    delete_transaction = delete_col.form_submit_button("Excluir lançamento", use_container_width=True)
+
+                if save_changes:
+                    if not description.strip():
+                        st.error("Informe uma descrição.")
+                    else:
+                        execute(
+                            "UPDATE transacoes SET tipo = ?, descricao = ?, valor = ?, data = ?, pedido_id = ?, categoria = ? WHERE id = ?",
+                            (kind, description.strip(), value, when.isoformat(), options[order_label], category.strip(), selected_transaction["id"]),
+                        )
+                        st.success("Lançamento atualizado.")
+                        reload_page()
+                if delete_transaction:
+                    if not confirm_delete:
+                        st.warning("Marque a confirmação antes de excluir o lançamento.")
+                    else:
+                        execute("DELETE FROM transacoes WHERE id = ?", (selected_transaction["id"],))
+                        st.success("Lançamento excluído.")
+                        reload_page()
         else:
             st.caption("Os lançamentos financeiros aparecerão aqui.")
 
