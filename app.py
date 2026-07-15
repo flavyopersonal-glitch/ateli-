@@ -27,6 +27,7 @@ APP_NAME = "Ateliê Cristo Rei"
 DB_PATH = Path("data") / "atelie.db"
 LOGO_PATH = Path(__file__).with_name("logo.jpeg")
 CAPACIDADE_DIARIA_HORAS = 8
+DIAS_SECAGEM_FABRICACAO = 3
 ORDER_STATUS = ["Novo pedido", "Em produção", "Aguardando aprovação", "Pronto para entrega", "Entregue", "Cancelado"]
 
 st.set_page_config(page_title=APP_NAME, page_icon="✦", layout="wide", initial_sidebar_state="expanded")
@@ -51,8 +52,8 @@ def workdays_for_hours(hours: float) -> int:
     return ceil(max(hours, 0) / CAPACIDADE_DIARIA_HORAS)
 
 
-def estimated_completion(start: date, hours: float) -> date:
-    """Calcula a conclusão, contando somente segunda a sexta-feira."""
+def estimated_completion(start: date, hours: float, requires_fabrication: bool = False) -> date:
+    """Calcula a conclusão com dias úteis e, se necessário, secagem."""
     remaining_days = workdays_for_hours(hours)
     current = start
 
@@ -63,10 +64,10 @@ def estimated_completion(start: date, hours: float) -> date:
         if current.weekday() < 5:
             remaining_days -= 1
             if remaining_days == 0:
-                return current
+                return current + timedelta(days=DIAS_SECAGEM_FABRICACAO if requires_fabrication else 0)
         current += timedelta(days=1)
 
-    return current
+    return current + timedelta(days=DIAS_SECAGEM_FABRICACAO if requires_fabrication else 0)
 
 
 def deadline_priority(deadline: str | None) -> str:
@@ -295,10 +296,11 @@ def render_orders() -> None:
             c, d = st.columns(2)
             horas = c.number_input("Horas de produção", min_value=0.0, step=0.5, help="Estimativa de horas necessárias para produzir a peça.")
             prazo = d.date_input("Prazo de entrega", value=None, format="DD/MM/YYYY")
-            if horas:
+            if horas or fabrication == "Sim":
                 days_needed = workdays_for_hours(horas)
-                finish_date = estimated_completion(date.today(), horas)
-                st.caption(f"Estimativa: {days_needed} dia(s) útil(eis) de trabalho · conclusão prevista em {finish_date.strftime('%d/%m/%Y')}.")
+                drying_note = f" + {DIAS_SECAGEM_FABRICACAO} dias corridos de secagem" if fabrication == "Sim" else ""
+                finish_date = estimated_completion(date.today(), horas, fabrication == "Sim")
+                st.caption(f"Estimativa: {days_needed} dia(s) útil(eis) de trabalho{drying_note} · conclusão prevista em {finish_date.strftime('%d/%m/%Y')}.")
                 if prazo and finish_date > prazo:
                     st.warning("A estimativa de produção ultrapassa o prazo informado.")
             d, e = st.columns(2)
@@ -326,8 +328,9 @@ def render_orders() -> None:
         selected = st.selectbox("Selecione um pedido", list(choices))
         item = choices[selected]
         hours = float(item.get("horas_estimadas") or 0)
-        production_time = f"{hours:g}h previstas · {workdays_for_hours(hours)} dia(s) útil(eis)" if hours else "Tempo de produção não informado"
         fabrication_status = "Sim" if item.get("exige_fabricacao", 1) else "Não"
+        drying_note = f" + {DIAS_SECAGEM_FABRICACAO} dias de secagem" if fabrication_status == "Sim" else ""
+        production_time = f"{hours:g}h previstas · {workdays_for_hours(hours)} dia(s) útil(eis){drying_note}" if hours else f"{DIAS_SECAGEM_FABRICACAO} dias de secagem" if fabrication_status == "Sim" else "Tempo de produção não informado"
         st.markdown(f'<div class="card"><b>{item["titulo"]}</b><br><span class="muted">{item["cliente"]} · Entrega: {iso_to_br(item["prazo"])}<br>Exige fabricação: {fabrication_status}<br>Produção: {production_time}<br>Valor: {brl(item["valor_combinado"])} · Custo previsto: {brl(item["custo_estimado"])}<br><br>{item["descricao"] or "Sem detalhes adicionais."}</span></div>', unsafe_allow_html=True)
         with st.form(f"atualiza_pedido_{item['id']}"):
             status = st.selectbox("Etapa atual", ORDER_STATUS, index=ORDER_STATUS.index(item["status"]))
