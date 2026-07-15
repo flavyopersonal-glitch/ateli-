@@ -244,13 +244,14 @@ def render_dashboard() -> None:
 
     st.subheader("Pedidos que precisam de atenção")
     attention = rows(
-        """SELECT id, cliente, titulo, prazo, status FROM pedidos
+        """SELECT id, cliente, titulo, prazo, horas_estimadas, status FROM pedidos
            WHERE status NOT IN ('Entregue', 'Cancelado')
            ORDER BY CASE WHEN prazo IS NULL THEN 1 ELSE 0 END, prazo ASC LIMIT 8"""
     )
     if attention:
-        frame = pd.DataFrame(attention).rename(columns={"id": "Nº", "cliente": "Cliente", "titulo": "Peça", "prazo": "Prazo", "status": "Etapa"})
+        frame = pd.DataFrame(attention).rename(columns={"id": "Nº", "cliente": "Cliente", "titulo": "Peça", "prazo": "Prazo", "horas_estimadas": "Horas", "status": "Etapa"})
         frame["Prazo"] = frame["Prazo"].map(iso_to_br)
+        frame["Horas"] = frame["Horas"].map(lambda hours: f"{float(hours or 0):g}h")
         st.dataframe(frame, use_container_width=True, hide_index=True)
     else:
         st.info("Ainda não há pedidos. Comece adicionando o primeiro pedido na aba Pedidos.")
