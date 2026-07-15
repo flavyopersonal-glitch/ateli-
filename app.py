@@ -116,10 +116,15 @@ def database() -> sqlite3.Connection:
             titulo TEXT NOT NULL,
             descricao TEXT,
             validade TEXT,
+            prazo_entrega TEXT,
+            tecnica TEXT,
+            horas_estimadas REAL NOT NULL DEFAULT 0,
+            exige_fabricacao INTEGER NOT NULL DEFAULT 1,
             valor REAL NOT NULL DEFAULT 0,
             prazo_producao TEXT,
             condicoes TEXT,
-            status TEXT NOT NULL DEFAULT 'Enviado',
+            status TEXT NOT NULL DEFAULT 'Pendente',
+            pedido_id INTEGER,
             criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS transacoes (
@@ -144,6 +149,18 @@ def database() -> sqlite3.Connection:
         conn.execute("ALTER TABLE pedidos ADD COLUMN horas_estimadas REAL NOT NULL DEFAULT 0")
     if "exige_fabricacao" not in columns:
         conn.execute("ALTER TABLE pedidos ADD COLUMN exige_fabricacao INTEGER NOT NULL DEFAULT 1")
+    quote_columns = {column["name"] for column in conn.execute("PRAGMA table_info(orcamentos)")}
+    quote_migrations = {
+        "prazo_entrega": "TEXT",
+        "tecnica": "TEXT",
+        "horas_estimadas": "REAL NOT NULL DEFAULT 0",
+        "exige_fabricacao": "INTEGER NOT NULL DEFAULT 1",
+        "pedido_id": "INTEGER",
+    }
+    for name, definition in quote_migrations.items():
+        if name not in quote_columns:
+            conn.execute(f"ALTER TABLE orcamentos ADD COLUMN {name} {definition}")
+    conn.execute("DELETE FROM orcamentos WHERE status != 'Aprovado' AND date(criado_em) <= date('now', '-30 days')")
     conn.commit()
     return conn
 
@@ -336,10 +353,11 @@ def render_orders() -> None:
             status = st.selectbox("Etapa atual", ORDER_STATUS, index=ORDER_STATUS.index(item["status"]))
             updated_hours = st.number_input("Horas de produção", min_value=0.0, step=0.5, value=hours)
             updated_fabrication = st.selectbox("Exige fabricação?", ["Sim", "Não"], index=0 if fabrication_status == "Sim" else 1)
+            updated_value = st.number_input("Valor combinado (R$)", min_value=0.0, step=10.0, value=float(item["valor_combinado"] or 0))
             updated_notes = st.text_area("Observações", value=item["observacoes"] or "")
             update = st.form_submit_button("Salvar atualização", use_container_width=True)
         if update:
-            execute("UPDATE pedidos SET status = ?, horas_estimadas = ?, exige_fabricacao = ?, observacoes = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", (status, updated_hours, updated_fabrication == "Sim", updated_notes, item["id"]))
+            execute("UPDATE pedidos SET status = ?, horas_estimadas = ?, exige_fabricacao = ?, valor_combinado = ?, observacoes = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?", (status, updated_hours, updated_fabrication == "Sim", updated_value, updated_notes, item["id"]))
             st.success("Pedido atualizado.")
             reload_page()
 
@@ -382,8 +400,10 @@ def quote_pdf(quote: dict[str, Any]) -> bytes:
     title = escape(str(quote["titulo"]))
     description = escape(str(quote["descricao"] or "Conforme detalhes combinados com o cliente.")).replace("\n", "<br/>")
     timing = escape(str(quote["prazo_producao"] or "A combinar"))
+    technique = escape(str(quote.get("tecnica") or "A combinar"))
+    fabrication = "Sim" if quote.get("exige_fabricacao", 1) else "Não"
     conditions = escape(str(quote["condicoes"] or "Condições de pagamento a combinar.")).replace("\n", "<br/>")
-    story = [brand, Spacer(1, .65*cm), client, Spacer(1, .75*cm), Paragraph("DETALHES DA ENCOMENDA", section), Paragraph(title, value), Spacer(1, .18*cm), Paragraph(description, body), Spacer(1, .7*cm), table, Spacer(1, .7*cm), Paragraph("PRAZO DE PRODUÇÃO", label), Paragraph(timing, body), Spacer(1, .42*cm), Paragraph("CONDIÇÕES", label), Paragraph(conditions, body), Spacer(1, 1.0*cm), Paragraph("Agradecemos a confiança em nosso trabalho. Será uma alegria transformar sua encomenda em uma peça especial.", ParagraphStyle("closing", parent=body, alignment=TA_CENTER, textColor=colors.HexColor("#765D42"), fontSize=9.3, leading=14))]
+    story = [brand, Spacer(1, .65*cm), client, Spacer(1, .75*cm), Paragraph("DETALHES DA ENCOMENDA", section), Paragraph(title, value), Spacer(1, .18*cm), Paragraph(description, body), Spacer(1, .45*cm), Paragraph(f"<b>Técnica / acabamento:</b> {technique}<br/><b>Exige fabricação:</b> {fabrication}", body), Spacer(1, .7*cm), table, Spacer(1, .7*cm), Paragraph("PRAZO DE PRODUÇÃO", label), Paragraph(timing, body), Spacer(1, .42*cm), Paragraph("CONDIÇÕES", label), Paragraph(conditions, body), Spacer(1, 1.0*cm), Paragraph("Agradecemos a confiança em nosso trabalho. Será uma alegria transformar sua encomenda em uma peça especial.", ParagraphStyle("closing", parent=body, alignment=TA_CENTER, textColor=colors.HexColor("#765D42"), fontSize=9.3, leading=14))]
     doc.title = f"Orçamento {quote['numero']} — Ateliê Cristo Rei"
     doc.build(story, onFirstPage=quote_pdf_footer, onLaterPages=quote_pdf_footer)
     return output.getvalue()
@@ -391,6 +411,7 @@ def quote_pdf(quote: dict[str, Any]) -> bytes:
 
 def render_quotes() -> None:
     st.markdown('<p class="eyebrow">Orçamentos</p><h1>Uma proposta que valoriza seu trabalho.</h1>', unsafe_allow_html=True)
+    st.caption("Orçamentos pendentes ou não aprovados são excluídos automaticamente após 30 dias corridos.")
     left, right = st.columns([1.05, 1], gap="large")
     with left:
         st.subheader("Criar orçamento")
@@ -400,29 +421,88 @@ def render_quotes() -> None:
             titulo = st.text_input("Peça ou serviço *", key="q_titulo")
             descricao = st.text_area("Descrição", key="q_desc")
             a, b = st.columns(2)
-            valor = a.number_input("Valor da proposta (R$)", min_value=0.0, step=10.0, key="q_valor")
-            validade = b.date_input("Válido até", value=date.today(), format="DD/MM/YYYY")
-            prazo = st.text_input("Prazo de produção", placeholder="Ex.: até 15 dias úteis")
+            tecnica = a.text_input("Técnica / acabamento", placeholder="Pintura artesanal", key="q_tecnica")
+            fabrication = b.selectbox("Exige fabricação?", ["Sim", "Não"], key="q_fabricacao")
+            c, d = st.columns(2)
+            horas = c.number_input("Horas de produção", min_value=0.0, step=0.5, key="q_horas")
+            prazo_entrega = d.date_input("Prazo de entrega", value=None, format="DD/MM/YYYY", key="q_prazo_entrega")
+            e, f = st.columns(2)
+            valor = e.number_input("Valor da proposta (R$)", min_value=0.0, step=10.0, key="q_valor")
+            validade = f.date_input("Válido até", value=date.today(), format="DD/MM/YYYY")
             conditions = st.text_area("Condições", value="50% de sinal para início da produção e 50% na entrega.")
             create = st.form_submit_button("Salvar orçamento", use_container_width=True)
         if create:
             if not cliente.strip() or not titulo.strip():
                 st.error("Informe o cliente e a peça.")
             else:
-                number = f"{date.today():%Y}-{scalar('SELECT COUNT(*) FROM orcamentos') + 1:03d}"
-                execute("INSERT INTO orcamentos (numero, cliente, telefone, titulo, descricao, validade, valor, prazo_producao, condicoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (number, cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), validade.isoformat(), valor, prazo.strip(), conditions.strip()))
+                number = f"{date.today():%Y}-{scalar('SELECT COALESCE(MAX(id), 0) FROM orcamentos') + 1:03d}"
+                days_needed = workdays_for_hours(horas)
+                drying = f" + {DIAS_SECAGEM_FABRICACAO} dias de secagem" if fabrication == "Sim" else ""
+                production_time = f"{days_needed} dia(s) útil(eis){drying}" if horas or fabrication == "Sim" else "A combinar"
+                execute(
+                    "INSERT INTO orcamentos (numero, cliente, telefone, titulo, descricao, validade, prazo_entrega, tecnica, horas_estimadas, exige_fabricacao, valor, prazo_producao, condicoes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente')",
+                    (number, cliente.strip(), telefone.strip(), titulo.strip(), descricao.strip(), validade.isoformat(), prazo_entrega.isoformat() if prazo_entrega else None, tecnica.strip(), horas, fabrication == "Sim", valor, production_time, conditions.strip()),
+                )
                 st.success(f"Orçamento {number} salvo.")
                 reload_page()
     with right:
-        st.subheader("Gerar PDF")
+        st.subheader("Gerar PDF e aprovar")
         quotes = rows("SELECT * FROM orcamentos ORDER BY criado_em DESC")
         if not quotes:
             st.caption("Salve um orçamento para gerar o documento em PDF.")
             return
         selected = st.selectbox("Orçamento", [f"{q['numero']} · {q['cliente']} — {q['titulo']}" for q in quotes])
         quote = quotes[[f"{q['numero']} · {q['cliente']} — {q['titulo']}" for q in quotes].index(selected)]
-        st.markdown(f'<div class="card"><b>{quote["numero"]}</b><br><span class="muted">{quote["cliente"]}<br>{quote["titulo"]}<br>Valor: {brl(quote["valor"])} · Válido até {iso_to_br(quote["validade"])}</span></div>', unsafe_allow_html=True)
+        fabrication_status = "Sim" if quote.get("exige_fabricacao", 1) else "Não"
+        st.markdown(f'<div class="card"><b>{quote["numero"]} · {quote["status"]}</b><br><span class="muted">{quote["cliente"]}<br>{quote["titulo"]}<br>Entrega: {iso_to_br(quote.get("prazo_entrega"))} · {float(quote.get("horas_estimadas") or 0):g}h · Fabricação: {fabrication_status}<br>Valor: {brl(quote["valor"])} · Válido até {iso_to_br(quote["validade"])}</span></div>', unsafe_allow_html=True)
         st.download_button("Baixar orçamento em PDF", data=quote_pdf(quote), file_name=f"orcamento-{quote['numero']}.pdf", mime="application/pdf", use_container_width=True)
+
+        with st.expander("Editar orçamento ou registrar aprovação"):
+            with st.form(f"editar_orcamento_{quote['id']}"):
+                edit_client = st.text_input("Nome do cliente *", value=quote["cliente"])
+                edit_phone = st.text_input("WhatsApp", value=quote["telefone"] or "")
+                edit_title = st.text_input("Peça ou serviço *", value=quote["titulo"])
+                edit_description = st.text_area("Descrição", value=quote["descricao"] or "")
+                a, b = st.columns(2)
+                edit_technique = a.text_input("Técnica / acabamento", value=quote.get("tecnica") or "")
+                edit_fabrication = b.selectbox("Exige fabricação?", ["Sim", "Não"], index=0 if quote.get("exige_fabricacao", 1) else 1)
+                c, d = st.columns(2)
+                edit_hours = c.number_input("Horas de produção", min_value=0.0, step=0.5, value=float(quote.get("horas_estimadas") or 0))
+                edit_due = d.date_input("Prazo de entrega", value=date.fromisoformat(quote["prazo_entrega"]) if quote.get("prazo_entrega") else None, format="DD/MM/YYYY")
+                e, f = st.columns(2)
+                edit_value = e.number_input("Valor da proposta (R$)", min_value=0.0, step=10.0, value=float(quote["valor"] or 0))
+                edit_validity = f.date_input("Válido até", value=date.fromisoformat(quote["validade"]) if quote.get("validade") else date.today(), format="DD/MM/YYYY")
+                statuses = ["Pendente", "Aprovado", "Não aprovado"]
+                edit_status = st.selectbox("Aprovação", statuses, index=statuses.index(quote["status"]) if quote["status"] in statuses else 0)
+                edit_conditions = st.text_area("Condições", value=quote["condicoes"] or "")
+                save_quote = st.form_submit_button("Salvar alterações", use_container_width=True)
+            if save_quote:
+                if not edit_client.strip() or not edit_title.strip():
+                    st.error("Informe o cliente e a peça.")
+                else:
+                    days_needed = workdays_for_hours(edit_hours)
+                    drying = f" + {DIAS_SECAGEM_FABRICACAO} dias de secagem" if edit_fabrication == "Sim" else ""
+                    production_time = f"{days_needed} dia(s) útil(eis){drying}" if edit_hours or edit_fabrication == "Sim" else "A combinar"
+                    execute(
+                        "UPDATE orcamentos SET cliente = ?, telefone = ?, titulo = ?, descricao = ?, validade = ?, prazo_entrega = ?, tecnica = ?, horas_estimadas = ?, exige_fabricacao = ?, valor = ?, prazo_producao = ?, condicoes = ?, status = ? WHERE id = ?",
+                        (edit_client.strip(), edit_phone.strip(), edit_title.strip(), edit_description.strip(), edit_validity.isoformat(), edit_due.isoformat() if edit_due else None, edit_technique.strip(), edit_hours, edit_fabrication == "Sim", edit_value, production_time, edit_conditions.strip(), edit_status, quote["id"]),
+                    )
+                    st.success("Orçamento atualizado.")
+                    reload_page()
+
+            if quote.get("pedido_id"):
+                st.success(f"Este orçamento já foi enviado para o pedido #{quote['pedido_id']}.")
+            elif st.button("Enviar orçamento aprovado para Pedidos", use_container_width=True):
+                if quote["status"] != "Aprovado":
+                    st.error("Altere o campo Aprovação para 'Aprovado' e salve antes de enviar para Pedidos.")
+                else:
+                    result = execute(
+                        "INSERT INTO pedidos (cliente, telefone, titulo, descricao, tecnica, prazo, horas_estimadas, exige_fabricacao, valor_combinado, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (quote["cliente"], quote["telefone"], quote["titulo"], quote["descricao"], quote.get("tecnica") or "", quote.get("prazo_entrega"), quote.get("horas_estimadas") or 0, quote.get("exige_fabricacao", 1), quote["valor"], f"Pedido criado a partir do orçamento {quote['numero']}"),
+                    )
+                    execute("UPDATE orcamentos SET pedido_id = ? WHERE id = ?", (result.lastrowid, quote["id"]))
+                    st.success("Pedido criado a partir do orçamento aprovado.")
+                    reload_page()
 
 
 def render_finance() -> None:
